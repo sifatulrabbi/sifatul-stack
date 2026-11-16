@@ -78,7 +78,7 @@ def merge(run, batch_size):
                 {"file": f["file"], "lines": list(f["lines"]), "members": [f]}
             )
 
-    findings, batch_plan = [], {"deep": [], "standard": []}
+    findings, groups = [], []
     for n, c in enumerate(
         sorted(clusters, key=lambda c: (c["file"], c["lines"][0])), 1
     ):
@@ -100,23 +100,20 @@ def merge(run, batch_size):
             else:
                 kept.append(dict(f, cluster=cid))
         findings.extend(kept)
-        tier = "deep" if any(SEV[f["severity"]] <= 1 for f in kept) else "standard"
-        batch_plan[tier].append([f["id"] for f in kept])
+        groups.append([f["id"] for f in kept])
 
-    batches = []
-    for tier, groups in batch_plan.items():
-        chunks, current = [], []
-        for ids in groups:  # a cluster always stays within one batch
-            if current and len(current) + len(ids) > batch_size:
-                chunks.append(current)
-                current = []
-            current += ids
-        if current:
+    chunks, current = [], []
+    for ids in groups:  # a cluster always stays within one batch
+        if current and len(current) + len(ids) > batch_size:
             chunks.append(current)
-        batches += [
-            {"name": f"{tier}-{i}", "tier": tier, "ids": ids}
-            for i, ids in enumerate(chunks, 1)
-        ]
+            current = []
+        current += ids
+    if current:
+        chunks.append(current)
+    batches = [
+        {"name": f"senior-{i}", "agent": "senior", "ids": ids}
+        for i, ids in enumerate(chunks, 1)
+    ]
 
     out = {"findings": findings, "batches": batches, **extras, "errors": errors}
     (run / "merged.json").write_text(json.dumps(out, indent=2))
@@ -126,7 +123,7 @@ def merge(run, batch_size):
         f"{len(clusters)} clusters. By severity: {sev_counts}"
     )
     for b in batches:
-        print(f"  batch {b['name']} ({b['tier']}): {len(b['ids'])} findings")
+        print(f"  batch {b['name']} ({b['agent']}): {len(b['ids'])} findings")
     for key, items in extras.items():
         if items:
             print(f"  {key}: {len(items)}")

@@ -1,19 +1,18 @@
 ---
 name: full-review
-description: Multi-agent code review — specialist reviewers chosen by risk, every finding verified by reproduction, one consolidated review. Use when the user asks to review or audit code changes, or to check them before merging.
+description: Multi-agent code review -- specialist reviewers chosen by risk, every finding verified by reproduction, one consolidated review. Use when the user asks to review or audit code changes, or to check them before merging.
 ---
 
-# Full review — lead
+# Full review -- lead
 
 You are the lead. You triage the change, decide which specialists run, launch them, get every finding verified, and write the final review. Specialists and verifiers never edit the user's code and only write inside the run directory. You are the only one who talks to the user and the only one who posts anything.
 
-Run this from a `deep` session. Every agent launch names a model tier, never a model, so the skill works in any harness. Map each tier to whatever your harness offers:
+Run this from a `senior` session. Every launch names one of these agents, never a model, so the skill works in any harness. If your harness lacks one, use its closest model:
 
-| Tier       | Use                                                 | Models                    |
-| ---------- | --------------------------------------------------- | ------------------------- |
-| `deep`     | The lead, high-risk specialists, high-stakes checks | Opus, Sol, or similar     |
-| `standard` | Everything else                                     | Sonnet, Terra, or similar |
-| `fast`     | The scout that gathers context for each job         | Haiku, Luna, or similar   |
+| Agent       | Use                                                    | Models                  |
+| ----------- | ------------------------------------------------------ | ----------------------- |
+| `senior`    | The lead, every specialist, and every verifier         | Opus, Sol, or similar   |
+| `associate` | The scout that gathers context for each job            | Haiku, Luna, or similar |
 
 If the harness can't set a model per agent, use the session model.
 
@@ -59,27 +58,27 @@ Size is semantic surface and risk, never file count: 100 files of renames is sma
 
 Write `RUN_DIR/brief.md`: base and head, `REVIEW_TREE`, intent (claimed vs actual), risk map, repo convention files to honor (REVIEW.md, CLAUDE.md, CONTRIBUTING.md, if present), what CI and linters already reported so nobody repeats it, and what's out of scope.
 
-Each specialist owns its whole concern area across every file it touches: one job per concern, whatever the file count. Launch only specialists whose trigger matches the risk map. Correctness runs on nearly every team review.
+Each specialist owns its whole concern area across every file it touches: one job per concern, whatever the file count. Launch only specialists whose trigger matches the risk map. Every specialist runs on `senior`: reviewing is judgment and discovery, which a `junior` can't verify its way through. Correctness runs on nearly every team review.
 
-| Specialist      | Tier       | Launch when the semantic change touches                                                                               |
-| --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| correctness     | `deep`     | Any logic (default for team reviews)                                                                                  |
-| security        | `deep`     | Auth, permissions, input parsing, external requests, file paths, secrets, crypto, user data, queries built from input |
-| architecture    | `deep`     | New modules, services or classes; cross-layer imports; moved responsibilities; a new pattern                          |
-| concurrency     | `deep`     | Async code, threads, locks, queues, shared mutable state, retries, timeouts                                           |
-| data-migrations | `deep`     | Schema files, migrations, backfills, ORM models                                                                       |
-| tests           | `standard` | Any behavior change, or test files                                                                                    |
-| maintainability | `standard` | Substantial new or rewritten code (skip for small fixes)                                                              |
-| performance     | `standard` | DB queries, loops over collections, request hot paths, caching, batch jobs                                            |
-| api-compat      | `standard` | Public APIs, exported functions, request/response schemas, events, CLI flags, config formats                          |
-| dependencies    | `standard` | Manifests or lockfiles                                                                                                |
-| ops-rollout     | `standard` | Config, feature flags, logging, metrics, deploy files, anything hard to roll back                                     |
+| Specialist      | Launch when the semantic change touches                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- |
+| correctness     | Any logic (default for team reviews)                                                                                  |
+| security        | Auth, permissions, input parsing, external requests, file paths, secrets, crypto, user data, queries built from input |
+| architecture    | New modules, services or classes; cross-layer imports; moved responsibilities; a new pattern                          |
+| concurrency     | Async code, threads, locks, queues, shared mutable state, retries, timeouts                                           |
+| data-migrations | Schema files, migrations, backfills, ORM models                                                                       |
+| tests           | Any behavior change, or test files                                                                                    |
+| maintainability | Substantial new or rewritten code (skip for small fixes)                                                              |
+| performance     | DB queries, loops over collections, request hot paths, caching, batch jobs                                            |
+| api-compat      | Public APIs, exported functions, request/response schemas, events, CLI flags, config formats                          |
+| dependencies    | Manifests or lockfiles                                                                                                |
+| ops-rollout     | Config, feature flags, logging, metrics, deploy files, anything hard to roll back                                     |
 
-If the risk map shows a concern no specialist covers (billing math, a specific flag rollout, an ML pipeline), fill in `references/adhoc-specialist.md` as `jobs/<job>-role.md` and launch it on `standard`, or `deep` if high-risk.
+If the risk map shows a concern no specialist covers (billing math, a specific flag rollout, an ML pipeline), fill in `references/adhoc-specialist.md` as `jobs/<job>-role.md` and launch it on `senior`.
 
 ## 4. Launch specialists
 
-First, launch a `fast` scout to gather facts for each job (callers and importers of changed symbols, related tests, interface definitions) into `RUN_DIR/jobs/<job>-context.md`. Facts only: paths, line ranges, snippets.
+First, launch an `associate` scout to gather facts for each job (callers and importers of changed symbols, related tests, interface definitions) into `RUN_DIR/jobs/<job>-context.md`. Facts only: paths, line ranges, snippets.
 
 Then write `RUN_DIR/jobs/<job>.md` for each specialist:
 
@@ -100,24 +99,24 @@ Other specialists in this run: <names>
 Focus: <risk-map items specific to this job>
 ```
 
-Launch all specialists in parallel, each on its tier with this prompt: `You are a code review specialist. Read your job file at RUN_DIR/jobs/<job>.md and follow it.`
+Launch all specialists in parallel, each as its agent with this prompt: `You are a code review specialist. Read your job file at RUN_DIR/jobs/<job>.md and follow it.`
 
 ## 5. Collect
 
 Read each findings file when its specialist finishes:
 
 - `uncovered` not empty: relaunch that job for the remaining scope.
-- `escalations`: launch the same specialist on `deep` for just those hunks (new job, e.g. `security-esc`).
+- `escalations`: launch the same specialist again for just those hunks (new job, e.g. `security-esc`), so it can go deeper on a narrower scope.
 - `handoffs`: if one points at a concern no running specialist covers, decide whether it needs its own job.
 
 ## 6. Verify
 
 Every finding is verified. The user should only see findings that survived an attempt to reproduce them.
 
-1. `python3 SKILL_DIR/scripts/merge_findings.py RUN_DIR merge` writes `merged.json`: duplicates folded, overlapping findings clustered, and verification batches planned (`deep` for any cluster with a critical or high finding, `standard` otherwise).
+1. `python3 SKILL_DIR/scripts/merge_findings.py RUN_DIR merge` writes `merged.json`: duplicates folded, overlapping findings clustered, and verification batches planned, each run by a `senior`.
 2. For each batch, create a scratch worktree: `git worktree add --detach WORKTREE_BASE/<batch> <head-sha>`.
 3. Write `RUN_DIR/jobs/verify-<batch>.md` with: Role `SKILL_DIR/agents/verifier.md`, Schema, Severity, Brief, Code, Findings (`RUN_DIR/merged.json`, ids from the batch), Scratch (the worktree path), Notes, Output `RUN_DIR/verified/<batch>.json`.
-4. Launch all verifiers in parallel on each batch's tier with the same one-line prompt pointing at the job file.
+4. Launch all verifiers in parallel as each batch's agent with the same one-line prompt pointing at the job file.
 5. `python3 SKILL_DIR/scripts/merge_findings.py RUN_DIR final` writes `final.json`: kept findings (confirmed and plausible) sorted by severity, plus dropped counts.
 
 ## 7. Write the review
@@ -128,11 +127,11 @@ Write `RUN_DIR/review.md` from `final.json` and show it in chat:
 # Review: <PR title or branch>
 
 **Intent:** <what the change does and whether it matches its description>
-**Verdict:** <approve | approve with suggestions | changes requested> — <one-line reason>
+**Verdict:** <approve | approve with suggestions | changes requested> -- <one-line reason>
 
 ## Critical (then High, Medium, Low; omit empty sections)
 
-### <title> — `path:start-end` · confirmed | plausible
+### <title> -- `path:start-end` · confirmed | plausible
 
 <what's wrong and its impact, 1–3 sentences>
 **Evidence:** <reproduction, or for plausible: the traced path and what couldn't be executed>
