@@ -1,0 +1,3 @@
+- Never hard-wrap Markdown; one paragraph = one line.
+- Use any available .planning/ dir as your scratchpad when you need one.
+- Follow the project's AGENTS.md or CLAUDE.md (CLAUDE.local.md or AGENTS.local.md or AGENTS.override.md may override CLAUDE.md) and the user's global instructions.
