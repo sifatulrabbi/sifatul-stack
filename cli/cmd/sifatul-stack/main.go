@@ -37,7 +37,7 @@ func defaultApp() app {
 	var choose func(context.Context, []ui.Choice) ([]string, error)
 	if animate && term.IsTerminal(os.Stdin.Fd()) {
 		choose = func(ctx context.Context, choices []ui.Choice) ([]string, error) {
-			return ui.Choose(ctx, os.Stdin, os.Stdout, "Install the stack into which harnesses?", choices)
+			return ui.Choose(ctx, os.Stdin, os.Stdout, "Install sifatul-stack into which harnesses?", choices)
 		}
 	}
 

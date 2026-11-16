@@ -14,8 +14,8 @@ import (
 const DefaultURL = "https://github.com/sifatulrabbi/sifatul-stack"
 
 var (
-	ErrDirty    = errors.New("the stack clone has local changes; commit, stash, or discard them first")
-	ErrNotSetUp = errors.New("the stack is not set up; run `sifatul-stack setup` first")
+	ErrDirty    = errors.New("the sifatul-stack clone has local changes; commit, stash, or discard them first")
+	ErrNotSetUp = errors.New("sifatul-stack is not set up; run `sifatul-stack setup` first")
 )
 
 type Git func(ctx context.Context, args ...string) ([]byte, error)

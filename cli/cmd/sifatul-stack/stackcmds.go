@@ -112,13 +112,13 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 	var harnesses []string
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Install the stack: clone it, link skills and global instructions, render the sub-agents",
-		Long: "Install the stack into Claude Code, Codex, and OpenCode, or the ones you choose.\n\n" +
-			"Clones the stack into the data dir (or uses --from), links skills and global instructions, and renders the named sub-agents. " +
+		Short: "Install sifatul-stack: clone it, link skills and global instructions, render the sub-agents",
+		Long: "Install sifatul-stack into Claude Code, Codex, and OpenCode, or the ones you choose.\n\n" +
+			"Clones sifatul-stack into the data dir (or uses --from), links skills and global instructions, and renders the named sub-agents. " +
 			"In a terminal, setup asks which harnesses to install into; --harness skips the question, and without either it keeps the last choice (all on a first setup). " +
 			"A harness you drop is cleaned up the same way `sifatul-stack remove` would. " +
 			"An existing global instructions file is backed up first; `sifatul-stack remove` restores it. " +
-			"Anything at a target path that the stack doesn't own is reported as a conflict and left alone.",
+			"Anything at a target path that sifatul-stack doesn't own is reported as a conflict and left alone.",
 		Example: "  sifatul-stack setup\n  sifatul-stack setup --harness claude,codex\n  sifatul-stack setup --from ~/projects/sifatul-stack",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -146,7 +146,7 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 			return e.sync(w, want, stack.Link)
 		},
 	}
-	cmd.Flags().StringVar(&from, "from", "", "use this checkout of the stack instead of a managed clone (edits show up live)")
+	cmd.Flags().StringVar(&from, "from", "", "use this checkout of sifatul-stack instead of a managed clone (edits show up live)")
 	cmd.Flags().StringSliceVar(&harnesses, "harness", nil, "install only into these harnesses: "+strings.Join(stack.Harnesses, ", ")+" (repeat or comma-separate)")
 	return cmd
 }
@@ -230,7 +230,7 @@ func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, 
 func newUpdateCmd(e stackEnv) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update",
-		Short: "Pull the latest stack and re-sync skills, instructions, and sub-agents",
+		Short: "Pull the latest sifatul-stack and re-sync skills, instructions, and sub-agents",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w := cmd.OutOrStdout()
