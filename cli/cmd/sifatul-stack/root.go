@@ -23,7 +23,8 @@ func exitCode(err error) int {
 	switch {
 	case err == nil:
 		return 0
-	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput), errors.Is(err, errPricesUpdate):
+	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput), errors.Is(err, errPricesUpdate),
+		errors.Is(err, errStack), errors.Is(err, errConflicts):
 		return 1
 	default:
 		return 2
@@ -36,7 +37,10 @@ type app struct {
 	weekly       weeklyCost
 	updatePrices func(ctx context.Context) (int, error)
 	pricesPath   string
+	stack        stackEnv
 }
+
+var version = "dev"
 
 func newRootCmd(a app) *cobra.Command {
 	root := &cobra.Command{
@@ -44,8 +48,9 @@ func newRootCmd(a app) *cobra.Command {
 		Short:         "Set up and update Sifatul's agent stack, and report coding-agent usage",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Version:       version,
 	}
-	root.AddCommand(newUsageCmd(a))
+	root.AddCommand(newSetupCmd(a.stack), newUpdateCmd(a.stack), newStatusCmd(a.stack), newRemoveCmd(a.stack), newUsageCmd(a))
 	return root
 }
 

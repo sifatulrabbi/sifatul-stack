@@ -2,7 +2,11 @@ module github.com/sifatulrabbi/sifatul-stack/cli
 
 go 1.27.3
 
-require github.com/spf13/cobra v1.10.2
+require (
+	github.com/BurntSushi/toml v1.5.0
+	github.com/spf13/cobra v1.10.2
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
