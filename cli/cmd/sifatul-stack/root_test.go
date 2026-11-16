@@ -48,7 +48,7 @@ func TestDefaultRunsAllProvidersAsText(t *testing.T) {
 	if exitCode(err) != 0 {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(out, "Claude") || !strings.Contains(out, "Codex") || !strings.Contains(out, "75% left") {
+	if !strings.Contains(out, "Claude") || !strings.Contains(out, "Codex") || !strings.Contains(out, "25% used") {
 		t.Fatalf("output:\n%s", out)
 	}
 }
@@ -79,7 +79,7 @@ func TestFailingProviderStillPrintsAndExitsOne(t *testing.T) {
 	if exitCode(err) != 1 {
 		t.Fatalf("exit = %d, err = %v", exitCode(err), err)
 	}
-	if !strings.Contains(out, "error: token expired") || !strings.Contains(out, "75% left") {
+	if !strings.Contains(out, "error: token expired") || !strings.Contains(out, "25% used") {
 		t.Fatalf("output:\n%s", out)
 	}
 }

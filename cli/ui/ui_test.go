@@ -21,12 +21,18 @@ func TestBarFillsAndColorsByUsage(t *testing.T) {
 		{130, "██████████", "bad"},
 		{-5, "░░░░░░░░░░", "ok"},
 	} {
-		if got := Plain(Bar(tt.used, 10)); got != tt.fill {
+		if got := Plain(Bar(tt.used, 10, false)); got != tt.fill {
 			t.Errorf("Bar(%v) = %q, want %q", tt.used, got, tt.fill)
 		}
 		if got := levelName(tt.used); got != tt.level {
 			t.Errorf("level(%v) = %s, want %s", tt.used, got, tt.level)
 		}
+	}
+}
+
+func TestSolidTrackKeepsTheWidth(t *testing.T) {
+	if got := Plain(Bar(30, 10, true)); got != "██████████" {
+		t.Errorf("solid bar = %q", got)
 	}
 }
 

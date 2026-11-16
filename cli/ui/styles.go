@@ -15,6 +15,10 @@ var (
 	Warn   = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
 	Bad    = lipgloss.NewStyle().Foreground(lipgloss.Red)
 	Accent = lipgloss.NewStyle().Foreground(lipgloss.Magenta).Bold(true)
+	Label  = lipgloss.NewStyle().Foreground(lipgloss.Yellow).Bold(true)
+	Figure = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
+	Fill   = lipgloss.NewStyle().Foreground(lipgloss.BrightBlue)
+	Track  = lipgloss.NewStyle().Foreground(lipgloss.BrightBlack)
 )
 
 func Level(used float64) lipgloss.Style {
@@ -24,7 +28,7 @@ func Level(used float64) lipgloss.Style {
 	case "warn":
 		return Warn
 	default:
-		return OK
+		return Fill
 	}
 }
 
@@ -39,9 +43,13 @@ func levelName(used float64) string {
 	}
 }
 
-func Bar(used float64, width int) string {
+func Bar(used float64, width int, solidTrack bool) string {
 	filled := max(0, min(width, int(used/100*float64(width)+0.5)))
-	return Level(used).Render(strings.Repeat("█", filled)) + Muted.Render(strings.Repeat("░", width-filled))
+	track := "░"
+	if solidTrack {
+		track = "█"
+	}
+	return Level(used).Render(strings.Repeat("█", filled)) + Track.Render(strings.Repeat(track, width-filled))
 }
 
 func Columns(rows [][]string, gap string) string {

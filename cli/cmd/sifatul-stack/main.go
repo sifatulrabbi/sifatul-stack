@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/x/term"
@@ -13,6 +14,7 @@ import (
 	"github.com/sifatulrabbi/sifatul-stack/cli/codex"
 	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
 	"github.com/sifatulrabbi/sifatul-stack/cli/litellm"
+	"github.com/sifatulrabbi/sifatul-stack/cli/render"
 	"github.com/sifatulrabbi/sifatul-stack/cli/source"
 	"github.com/sifatulrabbi/sifatul-stack/cli/stack"
 	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
@@ -40,6 +42,7 @@ func defaultApp() app {
 	store := litellm.Store{Path: filepath.Join(cacheDir, "sifatul-stack", "litellm_prices.json")}
 	codexDir := envOr("CODEX_HOME", filepath.Join(home, ".codex"))
 	animate := term.IsTerminal(os.Stdout.Fd()) && os.Getenv("TERM") != "dumb"
+	cols, _, _ := term.GetSize(os.Stdout.Fd())
 	claudeDir := envOr("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 
 	return app{
@@ -63,6 +66,11 @@ func defaultApp() app {
 		},
 		pricesPath: store.Path,
 		animate:    animate,
+		text: render.TextView{
+			Width: barWidth(cols),
+			Loc:   localZone(),
+			Color: animate && os.Getenv("NO_COLOR") == "",
+		},
 		stack: stackEnv{
 			layout:  stack.LayoutFromEnv(home, os.Getenv),
 			dataDir: filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(home, ".local", "share")), "sifatul-stack"),
@@ -99,4 +107,32 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func zoneName(getenv func(string) string, readlink func(string) (string, error)) string {
+	if tz := strings.TrimPrefix(getenv("TZ"), ":"); tz != "" {
+		return tz
+	}
+	target, err := readlink("/etc/localtime")
+	if err != nil {
+		return ""
+	}
+	_, name, _ := strings.Cut(target, "zoneinfo/")
+	return name
+}
+
+func localZone() *time.Location {
+	name := zoneName(os.Getenv, os.Readlink)
+	if loc, err := time.LoadLocation(name); err == nil && name != "" {
+		return loc
+	}
+	return time.Local
+}
+
+func barWidth(cols int) int {
+	const indent, figure = 2, 12
+	if cols <= 0 {
+		return 50
+	}
+	return max(10, min(50, cols-indent-figure))
 }

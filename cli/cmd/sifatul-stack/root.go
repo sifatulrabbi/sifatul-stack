@@ -41,6 +41,7 @@ type app struct {
 	pricesPath   string
 	stack        stackEnv
 	animate      bool
+	text         render.TextView
 }
 
 var version = "dev"
@@ -95,7 +96,7 @@ func newUsageCmd(a app) *cobra.Command {
 				reports = usage.Collect(ctx, selected)
 			}
 
-			write := render.Text
+			write := a.text.Text
 			switch {
 			case asJSON && pretty:
 				write = render.PrettyJSON

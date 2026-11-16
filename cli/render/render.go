@@ -85,7 +85,19 @@ func utcSecond(t time.Time) string {
 	return t.UTC().Truncate(time.Second).Format(time.RFC3339)
 }
 
-func Text(w io.Writer, reports []usage.Report, now time.Time) error {
+type TextView struct {
+	Width int
+	Loc   *time.Location
+	Color bool
+}
+
+const defaultBarWidth = 50
+
+func (v TextView) Text(w io.Writer, reports []usage.Report, now time.Time) error {
+	width := v.Width
+	if width <= 0 {
+		width = defaultBarWidth
+	}
 	var b strings.Builder
 	for i, r := range reports {
 		if i > 0 {
@@ -99,23 +111,21 @@ func Text(w io.Writer, reports []usage.Report, now time.Time) error {
 		if len(r.Windows) == 0 {
 			b.WriteString("  " + ui.Muted.Render("no active limits reported") + "\n")
 		}
-		var rows [][]string
 		for _, win := range r.Windows {
-			rows = append(rows, []string{
-				"  " + label(win.Name),
-				ui.Bar(win.UsedPercent, 20),
-				ui.Muted.Render(fmt.Sprintf("%3.0f%% used", win.UsedPercent)),
-				ui.Level(win.UsedPercent).Bold(true).Render(fmt.Sprintf("%3.0f%% left", win.RemainingPercent())),
-				ui.Muted.Render(windowNote(win, now)),
-			})
+			b.WriteString("\n  " + ui.Label.Render(label(win.Name)) + "\n")
+			b.WriteString("  " + ui.Bar(win.UsedPercent, width, v.Color) + "  " + ui.Figure.Render(fmt.Sprintf("%.0f%% used", win.UsedPercent)) + "\n")
+			if note := v.windowNote(win, now); note != "" {
+				b.WriteString("  " + ui.Muted.Render(note) + "\n")
+			}
 		}
-		b.WriteString(ui.Columns(rows, "  "))
 		b.WriteString(costBlock(r))
 		var extras [][]string
 		for _, k := range slices.Sorted(maps.Keys(r.Extras)) {
 			extras = append(extras, []string{"  " + ui.Muted.Render(strings.ReplaceAll(k, "_", " ")), r.Extras[k]})
 		}
-		b.WriteString(ui.Columns(extras, "  "))
+		if len(extras) > 0 {
+			b.WriteString("\n" + ui.Columns(extras, "  "))
+		}
 	}
 	return ui.Print(w, b.String())
 }
@@ -132,12 +142,12 @@ func header(r usage.Report, now time.Time) string {
 }
 
 var windowLabels = map[string]string{
-	"session":       "Session",
-	"weekly":        "Weekly",
-	"weekly_all":    "Weekly",
-	"weekly_scoped": "Weekly",
-	"five_hour":     "5-hour",
-	"seven_day":     "7-day",
+	"session":       "Current session",
+	"five_hour":     "Current session",
+	"weekly":        "Current week",
+	"seven_day":     "Current week",
+	"weekly_all":    "Current week (all models)",
+	"weekly_scoped": "Current week",
 	"extra_usage":   "Extra usage",
 }
 
@@ -148,7 +158,7 @@ func label(name string) string {
 		l = capitalize(strings.ReplaceAll(base, "_", " "))
 	}
 	if scoped {
-		l += " · " + scope
+		l += " (" + scope + ")"
 	}
 	return l
 }
@@ -160,14 +170,40 @@ func capitalize(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-func windowNote(win usage.Window, now time.Time) string {
-	if !win.Spend {
-		return resets(win.ResetsAt, now)
+func (v TextView) windowNote(win usage.Window, now time.Time) string {
+	switch {
+	case win.Spend && win.Budget != nil:
+		return money(win.Budget.Spent, win.Budget.Currency) + " of " + money(win.Budget.Limit, win.Budget.Currency) + " spent this month"
+	case win.Spend:
+		return "of the monthly spending limit"
+	case win.ResetsAt != nil:
+		return v.resetLine(*win.ResetsAt, now)
+	default:
+		return ""
 	}
-	if b := win.Budget; b != nil {
-		return money(b.Spent, b.Currency) + " of " + money(b.Limit, b.Currency) + " monthly extra-usage limit"
+}
+
+func (v TextView) resetLine(at, now time.Time) string {
+	if !at.After(now) {
+		return "Reset due"
 	}
-	return "of the monthly extra-usage limit"
+	loc := v.Loc
+	if loc == nil {
+		loc = time.Local
+	}
+	t, today := at.In(loc).Round(time.Minute), now.In(loc)
+	clock := t.Format("3:04pm")
+	if t.Minute() == 0 {
+		clock = t.Format("3pm")
+	}
+	s := "Resets " + clock
+	if t.YearDay() != today.YearDay() || t.Year() != today.Year() {
+		s = "Resets " + t.Format("Jan 2") + " at " + clock
+	}
+	if zone := loc.String(); zone != "Local" {
+		s += " (" + zone + ")"
+	}
+	return s
 }
 
 var currencySymbols = map[string]string{"USD": "$", "EUR": "€", "GBP": "£"}
@@ -177,17 +213,6 @@ func money(amount float64, currency string) string {
 		return fmt.Sprintf("%s%.2f", sym, amount)
 	}
 	return fmt.Sprintf("%s %.2f", currency, amount)
-}
-
-func resets(at *time.Time, now time.Time) string {
-	if at == nil {
-		return ""
-	}
-	d := at.Sub(now)
-	if d <= 0 {
-		return "reset due"
-	}
-	return "resets in " + humanize(d) + " · " + at.Local().Format("Mon 15:04")
 }
 
 func humanize(d time.Duration) string {

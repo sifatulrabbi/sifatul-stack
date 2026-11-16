@@ -25,15 +25,83 @@ func reports() []usage.Report {
 	}
 }
 
-func TestTextShowsUsageRemainingResetAndErrors(t *testing.T) {
+var dhaka = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Dhaka")
+	if err != nil {
+		panic(err)
+	}
+	return loc
+}()
+
+func text(t *testing.T, v TextView, rs ...usage.Report) string {
+	t.Helper()
 	var buf bytes.Buffer
-	if err := Text(&buf, reports(), now); err != nil {
+	if err := v.Text(&buf, rs, now); err != nil {
 		t.Fatal(err)
 	}
-	out := buf.String()
-	for _, want := range []string{"Claude  max", "5-hour", "37% used", " 63% left", "resets in 4h05m", "resets in 3d2h", "Codex", "✗ error: not logged in"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output missing %q:\n%s", want, out)
+	return buf.String()
+}
+
+func TestTextStacksLabelBarAndResetPerWindow(t *testing.T) {
+	out := text(t, TextView{Width: 20, Loc: dhaka}, reports()...)
+	want := "Claude  max\n" +
+		"\n" +
+		"  Current session\n" +
+		"  " + strings.Repeat("█", 7) + strings.Repeat("░", 13) + "  37% used\n" +
+		"  Resets 8:05pm (Asia/Dhaka)\n" +
+		"\n" +
+		"  Current week\n" +
+		"  " + strings.Repeat("█", 3) + strings.Repeat("░", 17) + "  12% used\n" +
+		"  Resets Nov 19 at 6pm (Asia/Dhaka)\n" +
+		"\n" +
+		"Codex\n" +
+		"  ✗ error: not logged in\n"
+	if out != want {
+		t.Errorf("got\n%s\nwant\n%s", out, want)
+	}
+}
+
+func TestSolidTrackOnlyWhenColorsShowIt(t *testing.T) {
+	r := usage.Report{Provider: "claude", Windows: []usage.Window{{Name: "session", UsedPercent: 50}}}
+	if out := text(t, TextView{Width: 10, Color: true}, r); !strings.Contains(out, strings.Repeat("█", 10)+"  50% used") {
+		t.Errorf("colored bar:\n%s", out)
+	}
+	if out := text(t, TextView{Width: 10}, r); !strings.Contains(out, "█████░░░░░  50% used") {
+		t.Errorf("plain bar:\n%s", out)
+	}
+}
+
+func TestResetLineRoundsToTheMinuteAndDropsZeroMinutes(t *testing.T) {
+	morning := time.Date(2026, 11, 16, 7, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		at   time.Time
+		want string
+	}{
+		{time.Date(2026, 11, 16, 8, 19, 59, 954_000_000, time.UTC), "Resets 2:20pm (Asia/Dhaka)"},
+		{time.Date(2026, 11, 19, 19, 0, 0, 0, time.UTC), "Resets Nov 20 at 1am (Asia/Dhaka)"},
+		{morning.Add(-time.Minute), "Reset due"},
+	} {
+		if got := (TextView{Loc: dhaka}).resetLine(tt.at, morning); got != tt.want {
+			t.Errorf("resetLine(%v) = %q, want %q", tt.at, got, tt.want)
+		}
+	}
+	if got := (TextView{Loc: time.FixedZone("Local", 0)}).resetLine(now.Add(time.Hour), now); got != "Resets 11am" {
+		t.Errorf("unnamed zone: %q", got)
+	}
+}
+
+func TestWindowLabelsMatchClaudeCode(t *testing.T) {
+	for name, want := range map[string]string{
+		"session":             "Current session",
+		"five_hour":           "Current session",
+		"weekly":              "Current week",
+		"weekly_all":          "Current week (all models)",
+		"weekly_scoped:Fable": "Current week (Fable)",
+		"extra_usage":         "Extra usage",
+		"seven_day_opus":      "Seven day opus",
+	} {
+		if got := label(name); got != want {
+			t.Errorf("label(%q) = %q, want %q", name, got, want)
 		}
 	}
 }
@@ -55,42 +123,10 @@ func TestPrettyJSONKeepsFullReport(t *testing.T) {
 	}
 }
 
-func TestWindowLabelsReadAsWords(t *testing.T) {
-	for name, want := range map[string]string{
-		"session":             "Session",
-		"weekly_all":          "Weekly",
-		"weekly_scoped:Fable": "Weekly · Fable",
-		"extra_usage":         "Extra usage",
-		"seven_day_opus":      "Seven day opus",
-	} {
-		if got := label(name); got != want {
-			t.Errorf("label(%q) = %q, want %q", name, got, want)
-		}
-	}
-}
-
-func TestTextAlignsWindowsWithColoredBars(t *testing.T) {
-	var buf bytes.Buffer
-	Text(&buf, reports()[:1], now)
-	lines := strings.Split(buf.String(), "\n")
-	if !strings.HasPrefix(lines[1], "  5-hour  "+strings.Repeat("█", 7)+strings.Repeat("░", 13)+"   37% used   63% left  resets in 4h05m · ") {
-		t.Errorf("window line = %q", lines[1])
-	}
-	if strings.Contains(buf.String(), "\x1b[") {
-		t.Errorf("a buffer got ANSI codes: %q", buf.String())
-	}
-}
-
-func TestResetInThePastSaysDue(t *testing.T) {
-	if got := resets(at(-time.Minute), now); got != "reset due" {
-		t.Errorf("resets = %q", got)
-	}
-}
-
 func TestTextFlagsStaleCachedReportAndExtras(t *testing.T) {
 	asOf := now.Add(-2 * time.Hour)
 	var buf bytes.Buffer
-	err := Text(&buf, []usage.Report{{
+	err := TextView{}.Text(&buf, []usage.Report{{
 		Provider: "codex", Plan: "plus", Source: "rollout-cache", AsOf: &asOf, Stale: true,
 		Windows: []usage.Window{{Name: "weekly", UsedPercent: 30}},
 		Extras:  map[string]string{"reset_credits_available": "3", "credits": "0.00"},
@@ -112,7 +148,7 @@ func TestTextFlagsStaleCachedReportAndExtras(t *testing.T) {
 func TestTextFreshReportHasNoAgeSuffix(t *testing.T) {
 	asOf := now
 	var buf bytes.Buffer
-	Text(&buf, []usage.Report{{Provider: "codex", Source: "codex app-server", AsOf: &asOf}}, now)
+	TextView{}.Text(&buf, []usage.Report{{Provider: "codex", Source: "codex app-server", AsOf: &asOf}}, now)
 	if strings.Contains(buf.String(), "as of") || !strings.Contains(buf.String(), "no active limits reported") {
 		t.Errorf("output:\n%s", buf.String())
 	}
@@ -171,7 +207,7 @@ func TestExtrasAreHiddenFromAgentsButShownToHumans(t *testing.T) {
 		t.Errorf("agent JSON leaked extras: %s", agent.String())
 	}
 	var human bytes.Buffer
-	Text(&human, []usage.Report{r}, now)
+	TextView{}.Text(&human, []usage.Report{r}, now)
 	if !strings.Contains(human.String(), "reset credits available  3") {
 		t.Errorf("text output lost extras:\n%s", human.String())
 	}
@@ -184,7 +220,7 @@ func TestSpendWindowsAreHiddenFromAgentsButShownToHumans(t *testing.T) {
 		t.Errorf("compact windows = %+v", got.Windows)
 	}
 	var buf bytes.Buffer
-	Text(&buf, []usage.Report{r}, now)
+	TextView{}.Text(&buf, []usage.Report{r}, now)
 	if !strings.Contains(buf.String(), "Extra usage") {
 		t.Errorf("text output lost spend window:\n%s", buf.String())
 	}
@@ -195,15 +231,15 @@ func TestSpendWindowSaysWhatItIsAPercentOf(t *testing.T) {
 		budget *usage.Budget
 		want   string
 	}{
-		{&usage.Budget{Spent: 8.2, Limit: 20, Currency: "EUR"}, "€8.20 of €20.00 monthly extra-usage limit"},
-		{&usage.Budget{Spent: 1, Limit: 50, Currency: "USD"}, "$1.00 of $50.00 monthly extra-usage limit"},
-		{&usage.Budget{Spent: 1, Limit: 50, Currency: "JPY"}, "JPY 1.00 of JPY 50.00 monthly extra-usage limit"},
-		{nil, "of the monthly extra-usage limit"},
+		{&usage.Budget{Spent: 8.2, Limit: 20, Currency: "EUR"}, "€8.20 of €20.00 spent this month"},
+		{&usage.Budget{Spent: 1, Limit: 50, Currency: "USD"}, "$1.00 of $50.00 spent this month"},
+		{&usage.Budget{Spent: 1, Limit: 50, Currency: "JPY"}, "JPY 1.00 of JPY 50.00 spent this month"},
+		{nil, "of the monthly spending limit"},
 	}
 	for _, tt := range tests {
 		r := usage.Report{Provider: "claude", Windows: []usage.Window{{Name: "extra_usage", UsedPercent: 41, Spend: true, Budget: tt.budget}}}
 		var buf bytes.Buffer
-		Text(&buf, []usage.Report{r}, now)
+		TextView{}.Text(&buf, []usage.Report{r}, now)
 		if !strings.Contains(buf.String(), tt.want) {
 			t.Errorf("budget %+v: output lacks %q:\n%s", tt.budget, tt.want, buf.String())
 		}
@@ -221,7 +257,7 @@ func weekCost() *cost.Summary {
 
 func TestTextShowsWeekCostPerModelAndUnpriced(t *testing.T) {
 	var buf bytes.Buffer
-	Text(&buf, []usage.Report{{Provider: "claude", Cost: weekCost()}}, now)
+	TextView{}.Text(&buf, []usage.Report{{Provider: "claude", Cost: weekCost()}}, now)
 	out := buf.String()
 	for _, want := range []string{
 		"Week cost  $123.46  API-equivalent since",
@@ -238,7 +274,7 @@ func TestTextShowsWeekCostPerModelAndUnpriced(t *testing.T) {
 
 func TestTextShowsWhyWeekCostIsUnavailable(t *testing.T) {
 	var buf bytes.Buffer
-	Text(&buf, []usage.Report{{Provider: "claude", CostError: "litellm prices not installed"}}, now)
+	TextView{}.Text(&buf, []usage.Report{{Provider: "claude", CostError: "litellm prices not installed"}}, now)
 	if !strings.Contains(buf.String(), "Week cost  unavailable (litellm prices not installed)") {
 		t.Errorf("output:\n%s", buf.String())
 	}
