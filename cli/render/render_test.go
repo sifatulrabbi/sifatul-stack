@@ -173,6 +173,26 @@ func TestSpendWindowsAreHiddenFromAgentsButShownToHumans(t *testing.T) {
 	}
 }
 
+func TestSpendWindowSaysWhatItIsAPercentOf(t *testing.T) {
+	tests := []struct {
+		budget *usage.Budget
+		want   string
+	}{
+		{&usage.Budget{Spent: 8.2, Limit: 20, Currency: "EUR"}, "€8.20 of €20.00 monthly extra-usage limit"},
+		{&usage.Budget{Spent: 1, Limit: 50, Currency: "USD"}, "$1.00 of $50.00 monthly extra-usage limit"},
+		{&usage.Budget{Spent: 1, Limit: 50, Currency: "JPY"}, "JPY 1.00 of JPY 50.00 monthly extra-usage limit"},
+		{nil, "of the monthly extra-usage limit"},
+	}
+	for _, tt := range tests {
+		r := usage.Report{Provider: "claude", Windows: []usage.Window{{Name: "extra_usage", UsedPercent: 41, Spend: true, Budget: tt.budget}}}
+		var buf bytes.Buffer
+		Text(&buf, []usage.Report{r}, now)
+		if !strings.Contains(buf.String(), tt.want) {
+			t.Errorf("budget %+v: output lacks %q:\n%s", tt.budget, tt.want, buf.String())
+		}
+	}
+}
+
 func weekCost() *cost.Summary {
 	return &cost.Summary{From: now.Add(-3 * 24 * time.Hour), To: now, USD: 123.456, Models: []cost.ModelCost{
 		{Model: "claude-opus-5-5", USD: 120, Priced: true, Tokens: cost.Tokens{CacheRead: 2_500_000_000}},

@@ -172,6 +172,22 @@ func TestParseLivePayloadPrefersLimitsArrayAndAddsExtraUsage(t *testing.T) {
 	if windows[0].Spend || !windows[3].Spend {
 		t.Fatalf("resets_at not mapped: %+v", windows)
 	}
+	if b := windows[3].Budget; b == nil || fmt.Sprintf("%.2f/%.2f %s", b.Spent, b.Limit, b.Currency) != "5.11/20.00 EUR" {
+		t.Fatalf("extra_usage budget = %+v, want 5.11 of 20.00 EUR (minor units scaled by decimal_places)", b)
+	}
+	if windows[0].Budget != nil {
+		t.Fatalf("limit window got a budget: %+v", windows[0].Budget)
+	}
+}
+
+func TestExtraUsageWithoutAmountsHasNoBudget(t *testing.T) {
+	windows, err := ParseUsage([]byte(`{"limits":[],"extra_usage":{"is_enabled":true,"utilization":41}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(windows) != 1 || windows[0].Budget != nil {
+		t.Fatalf("windows = %+v", windows)
+	}
 }
 
 func TestDisabledExtraUsageIsOmitted(t *testing.T) {

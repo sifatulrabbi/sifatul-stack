@@ -13,6 +13,13 @@ type Window struct {
 	ResetsAt      *time.Time `json:"resets_at,omitempty"`
 	WindowMinutes int        `json:"window_minutes,omitempty"`
 	Spend         bool       `json:"spend,omitempty"`
+	Budget        *Budget    `json:"budget,omitempty"`
+}
+
+type Budget struct {
+	Spent    float64 `json:"spent"`
+	Limit    float64 `json:"limit"`
+	Currency string  `json:"currency"`
 }
 
 func (w Window) RemainingPercent() float64 {

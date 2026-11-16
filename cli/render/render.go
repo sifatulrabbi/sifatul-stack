@@ -105,7 +105,7 @@ func Text(w io.Writer, reports []usage.Report, now time.Time) error {
 		}
 		for _, win := range r.Windows {
 			fmt.Fprintf(tw, "  %s\t%s\t%3.0f%% used\t%3.0f%% left\t%s\n",
-				win.Name, bar(win.UsedPercent), win.UsedPercent, win.RemainingPercent(), resets(win.ResetsAt, now))
+				win.Name, bar(win.UsedPercent), win.UsedPercent, win.RemainingPercent(), windowNote(win, now))
 		}
 		writeCost(tw, r)
 		for _, k := range slices.Sorted(maps.Keys(r.Extras)) {
@@ -120,6 +120,25 @@ func bar(used float64) string {
 	filled := int(used/100*width + 0.5)
 	filled = max(0, min(width, filled))
 	return "[" + strings.Repeat("#", filled) + strings.Repeat(".", width-filled) + "]"
+}
+
+func windowNote(win usage.Window, now time.Time) string {
+	if !win.Spend {
+		return resets(win.ResetsAt, now)
+	}
+	if b := win.Budget; b != nil {
+		return money(b.Spent, b.Currency) + " of " + money(b.Limit, b.Currency) + " monthly extra-usage limit"
+	}
+	return "of the monthly extra-usage limit"
+}
+
+var currencySymbols = map[string]string{"USD": "$", "EUR": "€", "GBP": "£"}
+
+func money(amount float64, currency string) string {
+	if sym, ok := currencySymbols[currency]; ok {
+		return fmt.Sprintf("%s%.2f", sym, amount)
+	}
+	return fmt.Sprintf("%s %.2f", currency, amount)
 }
 
 func resets(at *time.Time, now time.Time) string {

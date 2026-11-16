@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"time"
@@ -106,8 +107,12 @@ type limit struct {
 type usageResponse struct {
 	Limits     []limit `json:"limits"`
 	ExtraUsage *struct {
-		IsEnabled   bool     `json:"is_enabled"`
-		Utilization *float64 `json:"utilization"`
+		IsEnabled     bool     `json:"is_enabled"`
+		Utilization   *float64 `json:"utilization"`
+		MonthlyLimit  *float64 `json:"monthly_limit"`
+		UsedCredits   *float64 `json:"used_credits"`
+		Currency      string   `json:"currency"`
+		DecimalPlaces *int     `json:"decimal_places"`
 	} `json:"extra_usage"`
 }
 
@@ -134,7 +139,12 @@ func ParseUsage(body []byte) ([]usage.Window, error) {
 	}
 
 	if x := resp.ExtraUsage; x != nil && x.IsEnabled && x.Utilization != nil {
-		windows = append(windows, usage.Window{Name: "extra_usage", UsedPercent: *x.Utilization, Spend: true})
+		w := usage.Window{Name: "extra_usage", UsedPercent: *x.Utilization, Spend: true}
+		if x.MonthlyLimit != nil && x.UsedCredits != nil && x.DecimalPlaces != nil && x.Currency != "" {
+			scale := math.Pow10(*x.DecimalPlaces)
+			w.Budget = &usage.Budget{Spent: *x.UsedCredits / scale, Limit: *x.MonthlyLimit / scale, Currency: x.Currency}
+		}
+		windows = append(windows, w)
 	}
 	return windows, nil
 }

@@ -50,7 +50,7 @@ One line, built to cost agents few tokens: whole-number percents, precomputed `l
 - `stale`, `source`, `age_s`: present only when the live source failed and the numbers come from a cache. `age_s` is how old the cached snapshot is.
 - `error`: present only when a provider failed. The process then exits 1.
 
-Window names: `session` (5h) and `weekly` for Codex. Claude uses its own `kind` values (`session`, `weekly_all`, `weekly_scoped:<model>`). Spend windows such as Claude's `extra_usage` (paid overage credits) are not limits, so they are left out of `--json` and appear only in the text table and in `--json --pretty`. The same goes for `extras` (credits balance, reset credits, live-source errors): they're for people, not agents.
+Window names: `session` (5h) and `weekly` for Codex. Claude uses its own `kind` values (`session`, `weekly_all`, `weekly_scoped:<model>`). Spend windows such as Claude's `extra_usage` (paid overage credits, shown as spent of the monthly limit in the account's currency) are not limits, so they are left out of `--json` and appear only in the text table and in `--json --pretty`. The same goes for `extras` (credits balance, reset credits, live-source errors): they're for people, not agents.
 
 `--json --pretty` prints the unrounded domain report (`used_percent`, `window_minutes`, `as_of`, ...) for debugging.
 
