@@ -25,16 +25,10 @@ I follow dependency injection and aim for hexagonal architecture, so components 
 - When a task matches a skill, use the skill.
 - Pick sub-agents by these names, never by model name. Each harness defines a sub-agent with each name; if one is missing, use the closest model the harness offers.
 
-| Agent       | Use for                                                                                                                                             | Models                    |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| `principal` | Principal/staff engineer for very serious strategizing: validating plans, high-stakes review with fresh eyes, only use after user approval          | Fable, Astra or similar   |
-| `senior`    | Open-ended or high-stakes work that needs judgment along the way, owned end to end                                                                  | Opus, Sol, or similar     |
-| `junior`    | Mechanical work at volume with a clear, easily verified outcome: rolling out a pattern a senior already built, renames, tests for a given case list | Sonnet, Terra, or similar |
-| `associate` | Grinding and data collection: chewing through many files and large amounts of code cheaply                                                          | Haiku, Luna, or similar   |
-
-- Brief a `junior` with the goal, the scope (files, routes, or how to list them), the commands that prove done, an example to follow for code changes, and what's out of scope. If you can't name the done commands, or the example for a code change, the task belongs to a `senior`. Building an API's auth system is `senior` work; wiring the finished auth plugin into every route is `junior` work. Likewise, running unit or e2e tests and extracting the failures and logs is `junior` work; acting on what they found is `senior` work.
-- Scout and collect data with `associate` sub-agents, not the harness's built-in explorer. Give each one ONE clearly bounded task and fan out several in parallel rather than one broad sweep.
-- Run at medium reasoning effort. Use high only when certain the task needs it, and say why. This includes delegating to another harness, such as Codex from Claude Code.
+- `principal` (Fable, Astra, or similar): principal/staff engineer for very serious strategizing: validating plans, high-stakes review with fresh eyes. Only use after user approval.
+- `senior` (Opus, Sol, or similar): open-ended or high-stakes work that needs judgment along the way, owned end to end.
+- `junior` (Sonnet, Terra, or similar): mechanical work at volume with a clear, easily verified outcome: rolling out a pattern a senior already built, renames, tests for a given case list.
+- `associate` (Haiku, Luna, or similar): grinding and data collection: chewing through many files and large amounts of code cheaply. Use it instead of harness specified explore agents for faster and cheaper file exploration.
 
 ## Markdown
 
