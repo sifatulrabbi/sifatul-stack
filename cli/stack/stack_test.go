@@ -1,6 +1,7 @@
 package stack_test
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -387,5 +388,57 @@ func TestLayoutHonorsEnvironment(t *testing.T) {
 	want = stack.Layout{Claude: "/home/me/.claude", Codex: "/home/me/.codex", OpenCode: "/home/me/.config/opencode", AgentsSkills: "/home/me/.agents/skills"}
 	if l != want {
 		t.Errorf("default layout = %+v, want %+v", l, want)
+	}
+}
+
+func changes(r stack.Report) map[string]string {
+	out := map[string]string{}
+	for _, row := range r.Rows {
+		if row.Change != "" {
+			out[row.Kind+" "+row.Name+" "+row.Harness] = row.Change
+		}
+	}
+	return out
+}
+
+func TestRowsSayWhatThisRunChanged(t *testing.T) {
+	src := fixtureSource(t, "keep", "gone")
+	s := newSyncer(t, src)
+	write(t, filepath.Join(s.Layout.Claude, "CLAUDE.md"), "old global\n")
+
+	first := run(t, s, stack.Link)
+	for _, row := range first.Rows {
+		if row.Change == "" {
+			t.Errorf("fresh link left %s %s %s unmarked", row.Kind, row.Name, row.Harness)
+		}
+	}
+	got := changes(first)
+	if got["skill keep claude"] != "linked" || got["agent senior codex"] != "written" || got["instructions AGENTS.md codex"] != "linked" {
+		t.Errorf("fresh link changes = %v", got)
+	}
+	if !slices.ContainsFunc(first.Rows, func(r stack.Row) bool { return r.Change == "backed up" && r.Harness == "claude" }) {
+		t.Errorf("no backed-up row for claude: %+v", first.Rows)
+	}
+
+	if got := changes(run(t, s, stack.Link)); len(got) != 0 {
+		t.Errorf("relink changed %v", got)
+	}
+
+	senior := filepath.Join(s.Layout.Claude, "agents", "senior.md")
+	write(t, senior, strings.Replace(read(t, senior), "model: opus\n", "model: haiku\n", 1))
+	if got := changes(run(t, s, stack.Status)); len(got) != 0 {
+		t.Errorf("status reported changes %v", got)
+	}
+	if err := os.RemoveAll(filepath.Join(src, "skills", "gone")); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"agent senior claude": "re-rendered", "skill gone claude": "pruned", "skill gone agents": "pruned"}
+	if got := changes(run(t, s, stack.Link)); !maps.Equal(got, want) {
+		t.Errorf("changes = %v, want %v", got, want)
+	}
+
+	got = changes(run(t, s, stack.Unlink))
+	if got["skill keep claude"] != "removed" || got["agent senior opencode"] != "removed" || got["instructions AGENTS.md claude"] != "restored" || got["instructions AGENTS.md codex"] != "removed" {
+		t.Errorf("unlink changes = %v", got)
 	}
 }

@@ -47,6 +47,7 @@ type Row struct {
 	Name     string
 	Harness  string
 	State    string
+	Change   string
 	Conflict bool
 }
 
@@ -132,6 +133,10 @@ func (r *run) row(kind, name, harness, state string) {
 	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: state})
 }
 
+func (r *run) did(kind, name, harness, state, change string) {
+	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: state, Change: change})
+}
+
 func (r *run) conflict(kind, name, harness, why string) {
 	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: "conflict: " + why, Conflict: true})
 }
@@ -160,7 +165,7 @@ func (r *run) linkPath(kind, name, harness, src, dst string) {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		r.row(kind, name, harness, "removed")
+		r.did(kind, name, harness, "removed", "removed")
 		return
 	}
 	switch {
@@ -178,7 +183,7 @@ func (r *run) linkPath(kind, name, harness, src, dst string) {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		r.row(kind, name, harness, "linked")
+		r.did(kind, name, harness, "linked", "linked")
 	}
 }
 
@@ -214,7 +219,7 @@ func (r *run) retire(kind, name, harness, path, statusState string) {
 		if r.mode == Unlink {
 			state = "removed"
 		}
-		r.row(kind, name, harness, state)
+		r.did(kind, name, harness, state, state)
 	}
 }
 
@@ -231,7 +236,7 @@ func (r *run) linkInstructions(harness, dst string) {
 		}
 		backups, _ := filepath.Glob(dst + ".backup-*")
 		if len(backups) == 0 {
-			r.row(kind, name, harness, "removed")
+			r.did(kind, name, harness, "removed", "removed")
 			return
 		}
 		sort.Strings(backups)
@@ -240,7 +245,7 @@ func (r *run) linkInstructions(harness, dst string) {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		r.row(kind, name, harness, "restored "+filepath.Base(newest))
+		r.did(kind, name, harness, "restored "+filepath.Base(newest), "restored")
 		return
 	}
 	if fi, err := os.Lstat(dst); err == nil && fi.Mode().IsRegular() {
@@ -253,7 +258,7 @@ func (r *run) linkInstructions(harness, dst string) {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		r.row(kind, name, harness, "backed up to "+filepath.Base(backup))
+		r.did(kind, name, harness, "backed up to "+filepath.Base(backup), "backed up")
 	}
 	r.linkPath(kind, name, harness, src, dst)
 }
@@ -289,7 +294,7 @@ func (r *run) syncAgent(d agentDef, harness string) error {
 				r.fail("agent", d.Tier, harness, err)
 				return nil
 			}
-			r.row("agent", d.Tier, harness, "removed")
+			r.did("agent", d.Tier, harness, "removed", "removed")
 		}
 		return nil
 	}
@@ -305,6 +310,7 @@ func (r *run) syncAgent(d agentDef, harness string) error {
 	case string(raw) == wanted:
 		state = "current"
 	}
+	change := ""
 	if r.mode == Link && state != "current" {
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			r.fail("agent", d.Tier, harness, err)
@@ -314,12 +320,13 @@ func (r *run) syncAgent(d agentDef, harness string) error {
 			r.fail("agent", d.Tier, harness, err)
 			return nil
 		}
+		change = map[string]string{"missing": "written", "stale": "re-rendered"}[state]
 		state = "written"
 	}
 	if harness == "opencode" {
 		state = map[bool]string{true: "on", false: "off"}[enabled] + ", " + state
 	}
-	r.row("agent", d.Tier, harness, state)
+	r.did("agent", d.Tier, harness, state, change)
 	return nil
 }
 
