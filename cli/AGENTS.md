@@ -1,11 +1,12 @@
 # sifatul-stack CLI
 
-Go CLI that reports remaining Claude Code and Codex subscription quota for humans (table) and agents (`--json`). Layout, flags, sources, and the JSON contract live in `README.md`; read it before changing behavior.
+Go CLI that installs and updates the stack (`stack/`, `source/`; see the root `AGENTS.md` for how installs work) and reports remaining Claude Code and Codex subscription quota for humans (table) and agents (`--json`). The usage layout, flags, sources, and JSON contract live in `README.md`; read it before changing `usage` behavior.
 
 ## Workflow
 
 - `make check` must pass before you call work done (gofmt, vet, race tests).
-- Ports sit at real I/O boundaries only: `usage.Provider`, `codex.SnapshotSource`, `cost.Log`, `cost.PriceBook`, the clock, and process/HTTP starters. A new harness is a new package implementing `usage.Provider`, wired in `cmd/sifatul-stack/main.go`.
+- Packages stay flat at the module root; no `internal/`.
+- Ports sit at real I/O boundaries only: `source.Git`, `usage.Provider`, `codex.SnapshotSource`, `cost.Log`, `cost.PriceBook`, the clock, and process/HTTP starters. A new harness is a new package implementing `usage.Provider`, wired in `cmd/sifatul-stack/main.go`.
 - Every vendor-format finding gets a regression test, ideally against a real captured payload in that package's `testdata/` with identifiers redacted.
 - When delegating to Codex, request `gpt-6.1-sol` at `medium` effort; use `high` only when the task clearly needs it, and say why.
 
