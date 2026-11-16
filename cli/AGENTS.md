@@ -1,11 +1,11 @@
-# usage-shortly
+# sifatul-stack CLI
 
 Go CLI that reports remaining Claude Code and Codex subscription quota for humans (table) and agents (`--json`). Layout, flags, sources, and the JSON contract live in `README.md`; read it before changing behavior.
 
 ## Workflow
 
 - `make check` must pass before you call work done (gofmt, vet, race tests).
-- Ports sit at real I/O boundaries only: `usage.Provider`, `codex.SnapshotSource`, `cost.Log`, `cost.PriceBook`, the clock, and process/HTTP starters. A new harness is a new package implementing `usage.Provider`, wired in `cmd/usage-shortly/main.go`.
+- Ports sit at real I/O boundaries only: `usage.Provider`, `codex.SnapshotSource`, `cost.Log`, `cost.PriceBook`, the clock, and process/HTTP starters. A new harness is a new package implementing `usage.Provider`, wired in `cmd/sifatul-stack/main.go`.
 - Every vendor-format finding gets a regression test, ideally against a real captured payload in that package's `testdata/` with identifiers redacted.
 - When delegating to Codex, request `gpt-6.1-sol` at `medium` effort; use `high` only when the task clearly needs it, and say why.
 
@@ -22,12 +22,12 @@ Neither usage source is a documented API; both are what the official clients cal
 - **Codex usage**: `codex app-server --listen stdio://`, then `initialize` → `initialized` → `account/rateLimits/read`. Codex owns auth and refresh. Name windows by `windowDurationMins`, never by slot: a Plus plan reports its weekly window in `primary` with `secondary` null.
 - **Codex rollouts** (`~/.codex/sessions/**/rollout-*.jsonl`): `token_count` events repeat with unchanged totals, so cost uses deltas of `total_token_usage`. OpenAI semantics: `input_tokens` includes cached, `output_tokens` includes reasoning.
 - **Claude transcripts** (`~/.claude/projects/**/*.jsonl`): roughly half the usage lines are duplicates; dedupe by `message.id` + `requestId`. Skip model `<synthetic>`.
-- **Prices**: LiteLLM's price list, installed by `usage-shortly prices update`. Unknown models stay `unpriced`; map them explicitly in `priceAliases` (`cmd/usage-shortly/main.go`).
+- **Prices**: LiteLLM's price list, installed by `sifatul-stack usage prices update`. Unknown models stay `unpriced`; map them explicitly in `priceAliases` (`cmd/sifatul-stack/main.go`).
 
 ## Environment gotchas
 
 - Codex's own sandbox blocks the app-server (`Operation not permitted`) and network (DNS). Run live Codex checks from this session, not inside a Codex task.
-- The auto-mode classifier may block raw `curl` calls that carry the Claude OAuth token. Verify live through the built binary (`./bin/usage-shortly claude --json`) or ask the user.
+- The auto-mode classifier may block raw `curl` calls that carry the Claude OAuth token. Verify live through the built binary (`./bin/sifatul-stack usage claude --json`) or ask the user.
 
 ## Known gaps
 

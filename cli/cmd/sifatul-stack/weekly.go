@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/cost"
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/usage"
+	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
+	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 const week = 7 * 24 * time.Hour

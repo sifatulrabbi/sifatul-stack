@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/usage"
+	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 const DefaultBaseURL = "https://api.anthropic.com"

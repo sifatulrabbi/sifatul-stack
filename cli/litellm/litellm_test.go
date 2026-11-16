@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/cost"
+	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
 )
 
 func excerpt(t *testing.T) []byte {

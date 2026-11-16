@@ -6,7 +6,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/cost"
+	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
 )
 
 var weekStart = time.Date(2026, 11, 12, 19, 0, 0, 0, time.UTC)

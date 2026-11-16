@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/usage"
+	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 type fakeProvider struct {
@@ -34,7 +34,7 @@ var fixedNow = func() time.Time { return time.Date(2026, 11, 16, 10, 0, 0, 0, ti
 
 func execute(t *testing.T, providers []usage.Provider, args ...string) (string, error) {
 	t.Helper()
-	cmd := newRootCmd(app{providers: providers, now: fixedNow})
+	cmd := newUsageCmd(app{providers: providers, now: fixedNow})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
