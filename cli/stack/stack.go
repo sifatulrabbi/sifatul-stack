@@ -42,6 +42,17 @@ func LayoutFromEnv(home string, getenv func(string) string) Layout {
 	}
 }
 
+func (l Layout) Dir(harness string) string {
+	switch harness {
+	case "claude":
+		return l.Claude
+	case "codex":
+		return l.Codex
+	default:
+		return l.OpenCode
+	}
+}
+
 type Row struct {
 	Kind     string
 	Name     string
@@ -66,15 +77,31 @@ func (r Report) Conflicts() int {
 }
 
 type Syncer struct {
-	Source string
-	Layout Layout
-	Now    func() time.Time
+	Source   string
+	Layout   Layout
+	Now      func() time.Time
+	Selected []string
 }
 
 type run struct {
 	Syncer
 	mode   Mode
-	report Report
+	report *Report
+}
+
+func (s Syncer) selected(harness string) bool {
+	return len(s.Selected) == 0 || slices.Contains(s.Selected, harness)
+}
+
+func (r *run) on(harnesses ...string) *run {
+	switch {
+	case r.mode == Unlink || slices.ContainsFunc(harnesses, r.selected):
+		return r
+	case r.mode == Link:
+		return &run{Syncer: r.Syncer, mode: Unlink, report: r.report}
+	default:
+		return nil
+	}
 }
 
 func (s Syncer) Run(mode Mode) (Report, error) {
@@ -86,30 +113,47 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	r := &run{Syncer: s, mode: mode}
-	for _, name := range skills {
-		src := filepath.Join(s.Source, "skills", name)
-		r.linkPath("skill", name, "claude", src, filepath.Join(s.Layout.Claude, "skills", name))
-		r.linkPath("skill", name, "agents", src, filepath.Join(s.Layout.AgentsSkills, name))
+	r := &run{Syncer: s, mode: mode, report: &Report{}}
+	targets := []struct {
+		harness string
+		dir     string
+		users   []string
+	}{
+		{"claude", filepath.Join(s.Layout.Claude, "skills"), []string{"claude"}},
+		{"agents", s.Layout.AgentsSkills, []string{"codex", "opencode"}},
 	}
-	r.pruneSkills("claude", filepath.Join(s.Layout.Claude, "skills"), skills)
-	r.pruneSkills("agents", s.Layout.AgentsSkills, skills)
+	for _, t := range targets {
+		x := r.on(t.users...)
+		if x == nil {
+			continue
+		}
+		for _, name := range skills {
+			x.linkPath("skill", name, t.harness, filepath.Join(s.Source, "skills", name), filepath.Join(t.dir, name))
+		}
+		x.pruneSkills(t.harness, t.dir, skills)
+	}
 
-	r.linkInstructions("claude", filepath.Join(s.Layout.Claude, "CLAUDE.md"))
-	r.linkInstructions("codex", filepath.Join(s.Layout.Codex, "AGENTS.md"))
-	r.linkInstructions("opencode", filepath.Join(s.Layout.OpenCode, "AGENTS.md"))
+	for _, h := range Harnesses {
+		if x := r.on(h); x != nil {
+			x.linkInstructions(h, x.instructionsPath(h))
+		}
+	}
 
 	for _, d := range defs {
-		for _, h := range harnesses {
-			if err := r.syncAgent(d, h); err != nil {
-				return r.report, err
+		for _, h := range Harnesses {
+			if x := r.on(h); x != nil {
+				if err := x.syncAgent(d, h); err != nil {
+					return *r.report, err
+				}
 			}
 		}
 	}
-	for _, h := range harnesses {
-		r.pruneAgents(h, defs)
+	for _, h := range Harnesses {
+		if x := r.on(h); x != nil {
+			x.pruneAgents(h, defs)
+		}
 	}
-	return r.report, nil
+	return *r.report, nil
 }
 
 func (s Syncer) skills() ([]string, error) {
@@ -261,6 +305,13 @@ func (r *run) linkInstructions(harness, dst string) {
 		r.did(kind, name, harness, "backed up to "+filepath.Base(backup), "backed up")
 	}
 	r.linkPath(kind, name, harness, src, dst)
+}
+
+func (r *run) instructionsPath(harness string) string {
+	if harness == "claude" {
+		return filepath.Join(r.Layout.Claude, "CLAUDE.md")
+	}
+	return filepath.Join(r.Layout.Dir(harness), "AGENTS.md")
 }
 
 func (r *run) agentPath(tier, harness string) string {

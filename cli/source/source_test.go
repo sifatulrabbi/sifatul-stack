@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/sifatulrabbi/sifatul-stack/cli/source"
@@ -130,12 +131,23 @@ func TestStateRoundTrip(t *testing.T) {
 	if _, err := source.LoadState(path); !errors.Is(err, source.ErrNotSetUp) {
 		t.Fatalf("missing state: err = %v", err)
 	}
-	want := source.State{Source: "/x/stack", Managed: true}
+	want := source.State{Source: "/x/stack", Managed: true, Harnesses: []string{"claude", "codex"}}
 	if err := source.SaveState(path, want); err != nil {
 		t.Fatal(err)
 	}
 	got, err := source.LoadState(path)
-	if err != nil || got != want {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("state = %+v %v, want %+v", got, err, want)
+	}
+}
+
+func TestStateFromBeforeHarnessChoiceLoadsWithNoSelection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte(`{"source": "/x/stack", "managed": true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := source.LoadState(path)
+	if err != nil || got.Harnesses != nil {
+		t.Fatalf("state = %+v %v; an old state should mean every harness", got, err)
 	}
 }

@@ -88,8 +88,9 @@ func (r Repo) git(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 type State struct {
-	Source  string `json:"source"`
-	Managed bool   `json:"managed"`
+	Source    string   `json:"source"`
+	Managed   bool     `json:"managed"`
+	Harnesses []string `json:"harnesses,omitempty"`
 }
 
 func LoadState(path string) (State, error) {

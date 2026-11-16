@@ -442,3 +442,108 @@ func TestRowsSayWhatThisRunChanged(t *testing.T) {
 		t.Errorf("unlink changes = %v", got)
 	}
 }
+
+func harnessesIn(r stack.Report) []string {
+	var out []string
+	for _, row := range r.Rows {
+		if !slices.Contains(out, row.Harness) {
+			out = append(out, row.Harness)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func TestLinkTouchesOnlySelectedHarnesses(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	s.Selected = []string{"claude"}
+	l := s.Layout
+
+	r := run(t, s, stack.Link)
+
+	if got := harnessesIn(r); !slices.Equal(got, []string{"claude"}) {
+		t.Errorf("rows cover %v, want only claude", got)
+	}
+	assertLinksTo(t, filepath.Join(l.Claude, "CLAUDE.md"), filepath.Join(s.Source, "instructions", "AGENTS.md"))
+	if _, err := os.Stat(filepath.Join(l.Claude, "agents", "senior.md")); err != nil {
+		t.Error("claude agents were not rendered")
+	}
+	for _, p := range []string{l.AgentsSkills, l.Codex, l.OpenCode} {
+		assertMissing(t, p)
+	}
+}
+
+func TestSharedSkillsDirFollowsCodexOrOpenCode(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	s.Selected = []string{"opencode"}
+	run(t, s, stack.Link)
+
+	assertLinksTo(t, filepath.Join(s.Layout.AgentsSkills, "full-review"), filepath.Join(s.Source, "skills", "full-review"))
+	assertMissing(t, filepath.Join(s.Layout.Claude, "skills"))
+}
+
+func TestDeselectedHarnessIsRemovedOnLink(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	l := s.Layout
+	codexMD := filepath.Join(l.Codex, "AGENTS.md")
+	write(t, codexMD, "old codex global\n")
+	run(t, s, stack.Link)
+
+	s.Selected = []string{"claude", "opencode"}
+	r := run(t, s, stack.Link)
+
+	if read(t, codexMD) != "old codex global\n" {
+		t.Error("codex AGENTS.md backup was not restored")
+	}
+	assertMissing(t, filepath.Join(l.Codex, "agents", "senior.toml"))
+	assertLinksTo(t, filepath.Join(l.AgentsSkills, "full-review"), filepath.Join(s.Source, "skills", "full-review"))
+	if got := changes(r)["agent senior codex"]; got != "removed" {
+		t.Errorf("codex senior change = %q, want removed", got)
+	}
+
+	s.Selected = []string{"claude"}
+	run(t, s, stack.Link)
+	assertMissing(t, filepath.Join(l.AgentsSkills, "full-review"))
+	assertMissing(t, filepath.Join(l.OpenCode, "agents", "senior.md"))
+	assertLinksTo(t, filepath.Join(l.Claude, "skills", "full-review"), filepath.Join(s.Source, "skills", "full-review"))
+}
+
+func TestStatusReportsOnlySelectedHarnesses(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	run(t, s, stack.Link)
+	s.Selected = []string{"codex"}
+
+	r := run(t, s, stack.Status)
+
+	if got := harnessesIn(r); !slices.Equal(got, []string{"agents", "codex"}) {
+		t.Errorf("status covers %v, want agents and codex", got)
+	}
+	if _, err := os.Stat(filepath.Join(s.Layout.Claude, "agents", "senior.md")); err != nil {
+		t.Error("status removed an unselected harness's files")
+	}
+}
+
+func TestUnlinkRemovesEveryHarnessWhateverTheSelection(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	run(t, s, stack.Link)
+	s.Selected = []string{"claude"}
+
+	run(t, s, stack.Unlink)
+
+	assertMissing(t, filepath.Join(s.Layout.Codex, "agents", "senior.toml"))
+	assertMissing(t, filepath.Join(s.Layout.AgentsSkills, "full-review"))
+	assertMissing(t, filepath.Join(s.Layout.Claude, "CLAUDE.md"))
+}
+
+func TestParseHarnesses(t *testing.T) {
+	got, err := stack.ParseHarnesses([]string{"opencode", " Claude ", "opencode"})
+	if err != nil || !slices.Equal(got, []string{"claude", "opencode"}) {
+		t.Errorf("got %v %v, want [claude opencode] in canonical order without duplicates", got, err)
+	}
+	if _, err := stack.ParseHarnesses([]string{"cursor"}); err == nil || !strings.Contains(err.Error(), "claude, codex, opencode") {
+		t.Errorf("unknown harness error = %v", err)
+	}
+	if _, err := stack.ParseHarnesses(nil); err == nil {
+		t.Error("an empty selection should be refused")
+	}
+}

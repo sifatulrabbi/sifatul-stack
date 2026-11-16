@@ -8,7 +8,34 @@ import (
 	"strings"
 )
 
-var harnesses = []string{"claude", "codex", "opencode"}
+var Harnesses = []string{"claude", "codex", "opencode"}
+
+var harnessLabels = map[string]string{"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode"}
+
+func HarnessLabel(harness string) string {
+	if l, ok := harnessLabels[harness]; ok {
+		return l
+	}
+	return harness
+}
+
+func ParseHarnesses(names []string) ([]string, error) {
+	var want []string
+	for _, n := range names {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if n == "" {
+			continue
+		}
+		if !slices.Contains(Harnesses, n) {
+			return nil, fmt.Errorf("unknown harness %q; choose from %s", n, strings.Join(Harnesses, ", "))
+		}
+		want = append(want, n)
+	}
+	if len(want) == 0 {
+		return nil, fmt.Errorf("choose at least one harness from %s", strings.Join(Harnesses, ", "))
+	}
+	return slices.DeleteFunc(slices.Clone(Harnesses), func(h string) bool { return !slices.Contains(want, h) }), nil
+}
 
 type model struct {
 	Name   string
@@ -38,8 +65,8 @@ func loadAgents(source string) ([]agentDef, error) {
 			continue
 		}
 		f := strings.Split(line, "\t")
-		if len(f) != 4 || !slices.Contains(harnesses, f[1]) {
-			return nil, fmt.Errorf("agents/models.tsv line %d: want tier, harness (one of %v), model, effort separated by tabs", i+1, harnesses)
+		if len(f) != 4 || !slices.Contains(Harnesses, f[1]) {
+			return nil, fmt.Errorf("agents/models.tsv line %d: want tier, harness (one of %v), model, effort separated by tabs", i+1, Harnesses)
 		}
 		at := slices.IndexFunc(defs, func(d agentDef) bool { return d.Tier == f[0] })
 		if at < 0 {
@@ -90,7 +117,7 @@ func (d *agentDef) load(dir, shared string) error {
 	case strings.Contains(d.Prompt, "'''"):
 		return fmt.Errorf("%s or agents/shared.md: prompts must not contain three single quotes", file)
 	}
-	for _, h := range harnesses {
+	for _, h := range Harnesses {
 		if m, ok := d.Models[h]; !ok || m.Name == "" || m.Effort == "" {
 			return fmt.Errorf("agents/models.tsv lacks a model or effort for %s on %s", d.Tier, h)
 		}
