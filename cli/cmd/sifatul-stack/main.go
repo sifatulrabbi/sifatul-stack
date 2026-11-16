@@ -13,6 +13,8 @@ import (
 	"github.com/sifatulrabbi/sifatul-stack/cli/codex"
 	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
 	"github.com/sifatulrabbi/sifatul-stack/cli/litellm"
+	"github.com/sifatulrabbi/sifatul-stack/cli/source"
+	"github.com/sifatulrabbi/sifatul-stack/cli/stack"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
@@ -58,6 +60,13 @@ func defaultApp() app {
 			return store.Update(ctx, &http.Client{Timeout: 60 * time.Second}, litellm.DefaultURL)
 		},
 		pricesPath: store.Path,
+		stack: stackEnv{
+			layout:  stack.LayoutFromEnv(home, os.Getenv),
+			dataDir: filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(home, ".local", "share")), "sifatul-stack"),
+			repoURL: envOr("SIFATUL_STACK_REPO", source.DefaultURL),
+			git:     source.ExecGit,
+			now:     time.Now,
+		},
 	}
 }
 
