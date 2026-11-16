@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/cost"
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/usage"
+	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
+	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 var now = time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)

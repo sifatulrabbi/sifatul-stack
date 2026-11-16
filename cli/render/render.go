@@ -11,7 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/usage"
+	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 func PrettyJSON(w io.Writer, reports []usage.Report, now time.Time) error {

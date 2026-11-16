@@ -1,21 +1,21 @@
-# usage-shortly
+# sifatul-stack CLI
 
 One command to see the remaining subscription quota for Claude Code and Codex, for both humans and agents.
 
 ```sh
-make install                # build and install usage-shortly to ~/.local/bin (or: make install BINDIR=/usr/local/bin)
-usage-shortly prices update # one-time: install LiteLLM model prices for the weekly $ figure
+make install                # build and install sifatul-stack to ~/.local/bin (or: make install BINDIR=/usr/local/bin)
+sifatul-stack usage prices update # one-time: install LiteLLM model prices for the weekly $ figure
 ```
 
-Other targets: `make build` (to `./bin/usage-shortly`), `make test`, `make check` (gofmt + vet + race tests), `make uninstall`, `make clean`, `make help`.
+Other targets: `make build` (to `./bin/sifatul-stack`), `make test`, `make check` (gofmt + vet + race tests), `make uninstall`, `make clean`, `make help`.
 
 ```sh
-./bin/usage-shortly                 # all providers, human table
-./bin/usage-shortly --json          # compact one-line JSON, for agents
-./bin/usage-shortly --json --pretty # full indented report, for debugging
-./bin/usage-shortly codex           # one provider
-./bin/usage-shortly prices update   # install LiteLLM model prices (needed for the weekly $ figure)
-./bin/usage-shortly completion zsh  # shell completion (cobra)
+./bin/sifatul-stack usage                 # all providers, human table
+./bin/sifatul-stack usage --json          # compact one-line JSON, for agents
+./bin/sifatul-stack usage --json --pretty # full indented report, for debugging
+./bin/sifatul-stack usage codex           # one provider
+./bin/sifatul-stack usage prices update   # install LiteLLM model prices (needed for the weekly $ figure)
+./bin/sifatul-stack completion zsh        # shell completion (cobra)
 ```
 
 Exit code: `0` all providers reported, `1` at least one provider failed (its report carries `error`), `2` bad usage.
@@ -60,7 +60,7 @@ The table and `--json --pretty` show what this week's tokens would have cost at 
 
 - **Week:** the provider's weekly limit window, i.e. `resets_at - 7d` until now. Providers without a weekly window get no figure.
 - **Tokens:** read from local logs. Claude: `~/.claude/projects/**/*.jsonl`, deduplicated by message id + request id, with cache writes split into 5-minute and 1-hour tiers. Codex: `~/.codex/sessions/**/rollout-*.jsonl`, using deltas of the running `total_token_usage`, attributed to the model from the latest `turn_context`.
-- **Prices:** LiteLLM's `model_prices_and_context_window.json`, installed with `usage-shortly prices update` into the user cache directory (`~/Library/Caches/usage-shortly/` on macOS). A download that doesn't parse never replaces the installed file. Models without a price are listed as `unpriced` with their token count, never guessed. Models LiteLLM doesn't list can be mapped to another model's price in `priceAliases` (`cmd/usage-shortly/main.go`). Today `codex-auto-review` is priced as `gpt-6.1-terra`, and the table marks it `(priced as gpt-6.1-terra)`.
+- **Prices:** LiteLLM's `model_prices_and_context_window.json`, installed with `sifatul-stack usage prices update` into the user cache directory (`~/Library/Caches/sifatul-stack/` on macOS). A download that doesn't parse never replaces the installed file. Models without a price are listed as `unpriced` with their token count, never guessed. Models LiteLLM doesn't list can be mapped to another model's price in `priceAliases` (`cmd/sifatul-stack/main.go`). Today `codex-auto-review` is priced as `gpt-6.1-terra`, and the table marks it `(priced as gpt-6.1-terra)`.
 - **It's a lower bound:** it covers only this machine's logs, so usage from claude.ai web, desktop or mobile, Codex cloud tasks and other machines isn't counted.
 
 ## Environment
@@ -77,6 +77,6 @@ The table and `--json --pretty` show what this week's tokens would have cost at 
 - `cost/`: token/price domain (`Entry`, `Price`, `PriceBook` and `Log` ports, `Summarize`)
 - `litellm/`: LiteLLM price list parsing and the local price store (`prices update`)
 - `render/`: text and JSON output
-- `cmd/usage-shortly`: cobra commands (`root.go`), weekly cost attachment (`weekly.go`), and production wiring (`main.go`)
+- `cmd/sifatul-stack`: cobra commands (`root.go`), weekly cost attachment (`weekly.go`), and production wiring (`main.go`)
 
 Test fixtures in each package's `testdata/` are real responses captured on 2026-11-16, with identifiers redacted.

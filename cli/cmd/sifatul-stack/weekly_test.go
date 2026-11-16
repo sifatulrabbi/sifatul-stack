@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/cost"
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/usage"
+	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
+	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 type fakeLog struct {
@@ -110,7 +110,7 @@ func (c countingLog) Entries(context.Context, time.Time) ([]cost.Entry, error) {
 
 func run(t *testing.T, a app, args ...string) (string, error) {
 	t.Helper()
-	cmd := newRootCmd(a)
+	cmd := newUsageCmd(a)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)

@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/claude"
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/codex"
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/cost"
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/litellm"
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/usage"
+	"github.com/sifatulrabbi/sifatul-stack/cli/claude"
+	"github.com/sifatulrabbi/sifatul-stack/cli/codex"
+	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
+	"github.com/sifatulrabbi/sifatul-stack/cli/litellm"
+	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 func main() {
@@ -34,7 +34,7 @@ func defaultApp() app {
 	if err != nil {
 		cacheDir = filepath.Join(home, ".cache")
 	}
-	store := litellm.Store{Path: filepath.Join(cacheDir, "usage-shortly", "litellm_prices.json")}
+	store := litellm.Store{Path: filepath.Join(cacheDir, "sifatul-stack", "litellm_prices.json")}
 	codexDir := envOr("CODEX_HOME", filepath.Join(home, ".codex"))
 	claudeDir := envOr("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 

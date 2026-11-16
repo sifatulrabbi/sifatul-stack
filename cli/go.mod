@@ -1,4 +1,4 @@
-module github.com/sifatulrabbi/sifatul-stack/usage-shortly
+module github.com/sifatulrabbi/sifatul-stack/cli
 
 go 1.27.3
 

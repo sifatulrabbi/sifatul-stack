@@ -1,4 +1,4 @@
-BINARY := usage-shortly
+BINARY := sifatul-stack
 BUILD_DIR := bin
 BINDIR ?= $(HOME)/.local/bin
 GO ?= go
@@ -9,15 +9,15 @@ GO ?= go
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-10s %s\n", $$1, $$2}'
 
-build: ## Build ./bin/usage-shortly
-	$(GO) build -trimpath -o $(BUILD_DIR)/$(BINARY) ./cmd/usage-shortly
+build: ## Build ./bin/sifatul-stack
+	$(GO) build -trimpath -o $(BUILD_DIR)/$(BINARY) ./cmd/sifatul-stack
 
-install: build ## Install usage-shortly into ~/.local/bin (override with BINDIR=...)
+install: build ## Install sifatul-stack into ~/.local/bin (override with BINDIR=...)
 	install -d $(BINDIR)
 	install -m 0755 $(BUILD_DIR)/$(BINARY) $(BINDIR)/$(BINARY)
 	@echo "installed $(BINDIR)/$(BINARY)"
 
-uninstall: ## Remove usage-shortly from ~/.local/bin (or BINDIR=...)
+uninstall: ## Remove sifatul-stack from ~/.local/bin (or BINDIR=...)
 	rm -f $(BINDIR)/$(BINARY)
 
 test: ## Run all tests with the race detector

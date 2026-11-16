@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/render"
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/usage"
+	"github.com/sifatulrabbi/sifatul-stack/cli/render"
+	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 var (
@@ -39,18 +39,29 @@ type app struct {
 }
 
 func newRootCmd(a app) *cobra.Command {
+	root := &cobra.Command{
+		Use:           "sifatul-stack",
+		Short:         "Set up and update Sifatul's agent stack, and report coding-agent usage",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	root.AddCommand(newUsageCmd(a))
+	return root
+}
+
+func newUsageCmd(a app) *cobra.Command {
 	var asJSON, pretty bool
 	var timeout time.Duration
 	known := names(a.providers)
 
 	cmd := &cobra.Command{
-		Use:   "usage-shortly [provider ...]",
+		Use:   "usage [provider ...]",
 		Short: "Show remaining subscription quota for coding-agent harnesses",
 		Long: fmt.Sprintf("Show remaining subscription quota for coding-agent harnesses.\n\nProviders: %v (default: all).\n\n"+
 			"The table (and --json --pretty) also shows this week's API-equivalent cost, computed from local session logs\n"+
-			"and LiteLLM prices (install them once with `usage-shortly prices update`). Compact --json omits it.\n\n"+
+			"and LiteLLM prices (install them once with `sifatul-stack usage prices update`). Compact --json omits it.\n\n"+
 			"Exit codes: 0 all providers reported, 1 a provider failed (its report carries \"error\"), 2 bad usage.", known),
-		Example:       "  usage-shortly\n  usage-shortly --json\n  usage-shortly codex\n  usage-shortly prices update",
+		Example:       "  sifatul-stack usage\n  sifatul-stack usage --json\n  sifatul-stack usage codex\n  sifatul-stack usage prices update",
 		Args:          cobra.OnlyValidArgs,
 		ValidArgs:     known,
 		SilenceUsage:  true,

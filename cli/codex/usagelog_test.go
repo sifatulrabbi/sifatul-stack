@@ -10,7 +10,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/cost"
+	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
 )
 
 func usageTestEvent(timestamp string, totals usageTotals) string {

@@ -31,7 +31,7 @@ func (a AppServerSource) Read(ctx context.Context) (Reading, error) {
 
 	rpc := newRPC(conn)
 	init := map[string]any{
-		"clientInfo":   map[string]string{"name": "usage-shortly", "version": "0.1.0"},
+		"clientInfo":   map[string]string{"name": "sifatul-stack", "version": "0.1.0"},
 		"capabilities": map[string]any{"experimentalApi": true},
 	}
 	if err := rpc.call(1, "initialize", init, nil); err != nil {

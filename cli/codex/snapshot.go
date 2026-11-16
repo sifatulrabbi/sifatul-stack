@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/usage"
+	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 type Window struct {

@@ -11,12 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sifatulrabbi/sifatul-stack/usage-shortly/cost"
+	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
 )
 
 const DefaultURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
-var ErrNotInstalled = errors.New("litellm prices not installed (run `usage-shortly prices update`)")
+var ErrNotInstalled = errors.New("litellm prices not installed (run `sifatul-stack usage prices update`)")
 
 type entry struct {
 	Provider        string   `json:"litellm_provider"`
