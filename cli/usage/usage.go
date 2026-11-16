@@ -46,9 +46,11 @@ type Report struct {
 
 const weekMinutes = 7 * 24 * 60
 
+func (w Window) Weekly() bool { return w.WindowMinutes == weekMinutes && !w.Spend && w.ResetsAt != nil }
+
 func (r Report) WeeklyWindow() (Window, bool) {
 	for _, w := range r.Windows {
-		if w.WindowMinutes == weekMinutes && !w.Spend && w.ResetsAt != nil {
+		if w.Weekly() {
 			return w, true
 		}
 	}

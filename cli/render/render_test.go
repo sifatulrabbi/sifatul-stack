@@ -19,7 +19,7 @@ func reports() []usage.Report {
 	return []usage.Report{
 		{Provider: "claude", Plan: "max", Windows: []usage.Window{
 			{Name: "five_hour", UsedPercent: 37, ResetsAt: at(4*time.Hour + 5*time.Minute)},
-			{Name: "seven_day", UsedPercent: 12.5, ResetsAt: at(3*24*time.Hour + 2*time.Hour)},
+			{Name: "seven_day", UsedPercent: 12.5, ResetsAt: at(3*24*time.Hour + 2*time.Hour), WindowMinutes: 7 * 24 * 60},
 		}},
 		{Provider: "codex", Error: "not logged in"},
 	}
@@ -52,7 +52,7 @@ func TestTextStacksLabelBarAndResetPerWindow(t *testing.T) {
 		"\n" +
 		"  Current week\n" +
 		"  " + strings.Repeat("█", 3) + strings.Repeat("░", 17) + "  12% used\n" +
-		"  Resets Nov 19 at 6pm (Asia/Dhaka)\n" +
+		"  Week Nov 12 6pm – Nov 19 6pm (Asia/Dhaka) · resets in 3d2h\n" +
 		"\n" +
 		"Codex\n" +
 		"  ✗ error: not logged in\n"
@@ -87,6 +87,26 @@ func TestResetLineRoundsToTheMinuteAndDropsZeroMinutes(t *testing.T) {
 	}
 	if got := (TextView{Loc: time.FixedZone("Local", 0)}).resetLine(now.Add(time.Hour), now); got != "Resets 11am" {
 		t.Errorf("unnamed zone: %q", got)
+	}
+}
+
+func TestWeeklyWindowShowsTheWeekItCovers(t *testing.T) {
+	morning := time.Date(2026, 11, 16, 7, 0, 0, 0, time.UTC)
+	weekly := func(at time.Time) usage.Window {
+		return usage.Window{Name: "weekly_all", ResetsAt: &at, WindowMinutes: 7 * 24 * 60}
+	}
+	for _, tt := range []struct {
+		win  usage.Window
+		want string
+	}{
+		{weekly(time.Date(2026, 11, 19, 19, 0, 0, 0, time.UTC)), "Week Nov 13 1am – Nov 20 1am (Asia/Dhaka) · resets in 3d12h"},
+		{weekly(time.Date(2026, 11, 19, 19, 29, 40, 0, time.UTC)), "Week Nov 13 1:30am – Nov 20 1:30am (Asia/Dhaka) · resets in 3d12h"},
+		{weekly(morning.Add(-time.Minute)), "Reset due"},
+		{usage.Window{Name: "five_hour", ResetsAt: at(time.Hour), WindowMinutes: 300}, "Resets 5pm (Asia/Dhaka)"},
+	} {
+		if got := (TextView{Loc: dhaka}).windowNote(tt.win, morning); got != tt.want {
+			t.Errorf("windowNote(%s %v) = %q, want %q", tt.win.Name, tt.win.ResetsAt, got, tt.want)
+		}
 	}
 }
 

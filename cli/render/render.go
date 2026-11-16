@@ -176,6 +176,8 @@ func (v TextView) windowNote(win usage.Window, now time.Time) string {
 		return money(win.Budget.Spent, win.Budget.Currency) + " of " + money(win.Budget.Limit, win.Budget.Currency) + " spent this month"
 	case win.Spend:
 		return "of the monthly spending limit"
+	case win.Weekly() && win.ResetsAt.After(now):
+		return v.weekLine(*win.ResetsAt, now)
 	case win.ResetsAt != nil:
 		return v.resetLine(*win.ResetsAt, now)
 	default:
@@ -183,27 +185,43 @@ func (v TextView) windowNote(win usage.Window, now time.Time) string {
 	}
 }
 
+func (v TextView) loc() *time.Location {
+	if v.Loc == nil {
+		return time.Local
+	}
+	return v.Loc
+}
+
+func (v TextView) zoneSuffix() string {
+	if zone := v.loc().String(); zone != "Local" {
+		return " (" + zone + ")"
+	}
+	return ""
+}
+
+func clock(t time.Time) string {
+	if t.Minute() == 0 {
+		return t.Format("3pm")
+	}
+	return t.Format("3:04pm")
+}
+
 func (v TextView) resetLine(at, now time.Time) string {
 	if !at.After(now) {
 		return "Reset due"
 	}
-	loc := v.Loc
-	if loc == nil {
-		loc = time.Local
-	}
-	t, today := at.In(loc).Round(time.Minute), now.In(loc)
-	clock := t.Format("3:04pm")
-	if t.Minute() == 0 {
-		clock = t.Format("3pm")
-	}
-	s := "Resets " + clock
+	t, today := at.In(v.loc()).Round(time.Minute), now.In(v.loc())
+	s := "Resets " + clock(t)
 	if t.YearDay() != today.YearDay() || t.Year() != today.Year() {
-		s = "Resets " + t.Format("Jan 2") + " at " + clock
+		s = "Resets " + t.Format("Jan 2") + " at " + clock(t)
 	}
-	if zone := loc.String(); zone != "Local" {
-		s += " (" + zone + ")"
-	}
-	return s
+	return s + v.zoneSuffix()
+}
+
+func (v TextView) weekLine(end, now time.Time) string {
+	e := end.In(v.loc()).Round(time.Minute)
+	s := e.Add(-7 * 24 * time.Hour)
+	return "Week " + s.Format("Jan 2") + " " + clock(s) + " – " + e.Format("Jan 2") + " " + clock(e) + v.zoneSuffix() + " · resets in " + humanize(end.Sub(now))
 }
 
 var currencySymbols = map[string]string{"USD": "$", "EUR": "€", "GBP": "£"}
