@@ -42,16 +42,16 @@ func plainSummary(t *testing.T, rows []stack.Row) string {
 func TestStackSummaryGroupsChangesByKind(t *testing.T) {
 	out := plainSummary(t, freshSetup())
 	for _, want := range []string{
-		"Skills        ✓ 8 linked into claude, agents",
+		"Skills        ✓ 8 linked into Claude Code, ~/.agents",
 		"+ new  a, b, c, d, e, f, and 2 more",
-		"Instructions  ✓ linked into claude, codex",
-		"+ new  claude",
-		"• backed up  claude (CLAUDE.md.backup-20261116120000)",
-		"Sub-agents    ✓ 1 rendered for claude, codex, opencode",
-		"~ re-rendered  senior (codex)",
-		"○ 1 off in opencode",
+		"Instructions  ✓ linked into Claude Code, Codex",
+		"+ new  Claude Code",
+		"• backed up  Claude Code (CLAUDE.md.backup-20261116120000)",
+		"Sub-agents    ✓ 1 rendered for Claude Code, Codex, OpenCode",
+		"~ re-rendered  senior (Codex)",
+		"○ 1 off in OpenCode",
 		"! 1 conflict, left alone",
-		"skill x · claude  /h/.claude/skills/x exists",
+		"skill x · Claude Code  /h/.claude/skills/x exists",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary lacks %q:\n%s", want, out)
@@ -68,7 +68,7 @@ func TestStackSummaryOfARemoval(t *testing.T) {
 		row("instructions", "AGENTS.md", "claude", "restored CLAUDE.md.backup-1", "restored"),
 		row("instructions", "AGENTS.md", "codex", "removed", "removed"),
 	})
-	if strings.Contains(out, "✓") || !strings.Contains(out, "− removed  a") || !strings.Contains(out, "• restored  claude (CLAUDE.md.backup-1)") || !strings.Contains(out, "− removed  codex") {
+	if strings.Contains(out, "✓") || !strings.Contains(out, "− removed  a") || !strings.Contains(out, "• restored  Claude Code (CLAUDE.md.backup-1)") || !strings.Contains(out, "− removed  Codex") {
 		t.Errorf("summary:\n%s", out)
 	}
 }
@@ -88,12 +88,12 @@ func TestStackStatusIsAMatrixWithAFixHint(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"Skills       claude       agents",
-		"  tdd        ✓ linked     ✗ missing",
+		"Skills       Claude Code   ~/.agents",
+		"  tdd        ✓ linked      ✗ missing",
 		"  old        − dangling",
-		"\n\nSub-agents   claude       opencode",
-		"  senior     ~ stale      ✓ on",
-		"  junior                  ○ off",
+		"\n\nSub-agents   Claude Code   OpenCode",
+		"  senior     ~ stale       ✓ on",
+		"  junior                   ○ off",
 		"run `sifatul-stack update`",
 	} {
 		if !strings.Contains(out, want) {

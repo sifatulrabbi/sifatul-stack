@@ -10,7 +10,7 @@ import (
 
 var Harnesses = []string{"claude", "codex", "opencode"}
 
-var harnessLabels = map[string]string{"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode"}
+var harnessLabels = map[string]string{"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode", "agents": "~/.agents"}
 
 func HarnessLabel(harness string) string {
 	if l, ok := harnessLabels[harness]; ok {

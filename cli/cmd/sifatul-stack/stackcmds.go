@@ -19,6 +19,8 @@ import (
 	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 )
 
+const brand = "sifatul-stack"
+
 var (
 	errStack     = errors.New("stack")
 	errConflicts = errors.New("resolve the conflicts above and rerun")
@@ -48,11 +50,11 @@ func (e stackEnv) print(w io.Writer, s string) error { return ui.Print(w, e.tild
 func (e stackEnv) progress(w io.Writer) ui.Progress { return ui.Progress{Out: w, Animate: e.animate} }
 
 func (e stackEnv) note(w io.Writer, glyph, msg string) {
-	e.print(w, glyph+" stack"+ui.Muted.Render(" · ")+msg+"\n")
+	e.print(w, glyph+" "+brand+ui.Muted.Render(" · ")+msg+"\n")
 }
 
 func (e stackEnv) step(cmd *cobra.Command, do func(ctx context.Context) (string, error)) error {
-	res := e.progress(cmd.OutOrStdout()).Run(cmd.Context(), true, ui.Task{Label: "stack", Do: func(ctx context.Context) (string, error) {
+	res := e.progress(cmd.OutOrStdout()).Run(cmd.Context(), true, ui.Task{Label: brand, Do: func(ctx context.Context) (string, error) {
 		detail, err := do(ctx)
 		return e.tilde(detail), err
 	}})
@@ -283,7 +285,7 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 				chosen = stack.Harnesses
 			}
 			e.print(w, ui.Columns([][]string{
-				{ui.Accent.Render("Stack"), kind + ui.Muted.Render(" · "+st.Source)},
+				{ui.Accent.Render(brand), kind + ui.Muted.Render(" · "+st.Source)},
 				{ui.Accent.Render("Harnesses"), labels(chosen)},
 			}, "  ")+"\n")
 			return e.sync(w, st, stack.Status)

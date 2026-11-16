@@ -53,7 +53,7 @@ func StackSummary(rows []stack.Row) string {
 		if k.kind == "agent" {
 			off := filterRows(ofKind, func(r stack.Row) bool { return strings.HasPrefix(r.State, "off,") })
 			if len(off) > 0 {
-				lines = append(lines, ui.Muted.Render(fmt.Sprintf("○ %d off in opencode; delete `disabled: true` from one to switch it on", len(off))))
+				lines = append(lines, ui.Muted.Render(fmt.Sprintf("○ %d off in OpenCode; delete `disabled: true` from one to switch it on", len(off))))
 			}
 		}
 		for i, l := range lines {
@@ -78,10 +78,10 @@ func StackStatus(rows []stack.Row) string {
 		if len(table) > 0 {
 			table = append(table, nil)
 		}
-		harnesses := unique(ofKind, harnessOf)
+		harnesses := unique(ofKind, func(r stack.Row) string { return r.Harness })
 		header := []string{ui.Bold.Render(k.title)}
 		for _, h := range harnesses {
-			header = append(header, ui.Muted.Render(h))
+			header = append(header, ui.Muted.Render(stack.HarnessLabel(h)))
 		}
 		table = append(table, header)
 		for _, name := range unique(ofKind, func(r stack.Row) string { return r.Name }) {
@@ -143,7 +143,7 @@ func conflicts(rows []stack.Row) string {
 	}
 	var table [][]string
 	for _, r := range bad {
-		table = append(table, []string{"  " + r.Kind + " " + r.Name + ui.Muted.Render(" · "+r.Harness), strings.TrimPrefix(r.State, "conflict: ")})
+		table = append(table, []string{"  " + r.Kind + " " + r.Name + ui.Muted.Render(" · "+harnessOf(r)), strings.TrimPrefix(r.State, "conflict: ")})
 	}
 	return ui.Bad.Render(fmt.Sprintf("! %d %s, left alone", len(bad), noun)) + "\n" + ui.Columns(table, "  ")
 }
@@ -152,7 +152,7 @@ func changedItems(kind string, all, changed []stack.Row) string {
 	var items []string
 	if kind == "instructions" {
 		for _, r := range changed {
-			item := r.Harness
+			item := harnessOf(r)
 			if r.Change == "backed up" || r.Change == "restored" {
 				f := strings.Fields(r.State)
 				item += ui.Muted.Render(" (" + f[len(f)-1] + ")")
@@ -175,7 +175,7 @@ func changedItems(kind string, all, changed []stack.Row) string {
 	return strings.Join(items, ", ")
 }
 
-func harnessOf(r stack.Row) string { return r.Harness }
+func harnessOf(r stack.Row) string { return stack.HarnessLabel(r.Harness) }
 
 func filterRows(rows []stack.Row, keep func(stack.Row) bool) []stack.Row {
 	var out []stack.Row
