@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/sifatulrabbi/sifatul-stack/cli/render"
+	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
@@ -38,6 +40,7 @@ type app struct {
 	updatePrices func(ctx context.Context) (int, error)
 	pricesPath   string
 	stack        stackEnv
+	animate      bool
 }
 
 var version = "dev"
@@ -81,10 +84,15 @@ func newUsageCmd(a app) *cobra.Command {
 			selected := selectProviders(a.providers, args)
 			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 			defer cancel()
-			reports := usage.Collect(ctx, selected)
-			humanView := !asJSON || pretty
-			if humanView {
+			var reports []usage.Report
+			switch {
+			case !asJSON:
+				reports = a.fetchWithProgress(ctx, cmd.OutOrStdout(), selected)
+			case pretty:
+				reports = usage.Collect(ctx, selected)
 				a.weekly.attach(ctx, reports, a.now())
+			default:
+				reports = usage.Collect(ctx, selected)
 			}
 
 			write := render.Text
@@ -110,6 +118,24 @@ func newUsageCmd(a app) *cobra.Command {
 	return cmd
 }
 
+func (a app) fetchWithProgress(ctx context.Context, w io.Writer, providers []usage.Provider) []usage.Report {
+	progress := ui.Progress{Out: w, Animate: a.animate}
+	reports := make([]usage.Report, len(providers))
+	tasks := make([]ui.Task, len(providers))
+	for i, p := range providers {
+		tasks[i] = ui.Task{Label: "fetching " + p.Name(), Do: func(ctx context.Context) (string, error) {
+			reports[i] = usage.Fetch(ctx, p)
+			return "", nil
+		}}
+	}
+	progress.Run(ctx, false, tasks...)
+	progress.Run(ctx, false, ui.Task{Label: "reading this week's session logs", Do: func(ctx context.Context) (string, error) {
+		a.weekly.attach(ctx, reports, a.now())
+		return "", nil
+	}})
+	return reports
+}
+
 func newPricesCmd(a app) *cobra.Command {
 	prices := &cobra.Command{
 		Use:   "prices",
@@ -124,7 +150,7 @@ func newPricesCmd(a app) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("%w: %w", errPricesUpdate, err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "installed %d model prices to %s\n", n, a.pricesPath)
+			ui.Print(cmd.OutOrStdout(), ui.OK.Render("✓")+fmt.Sprintf(" installed %d model prices", n)+ui.Muted.Render(" · "+a.pricesPath)+"\n")
 			return nil
 		},
 	})

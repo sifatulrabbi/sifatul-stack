@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
@@ -66,24 +67,23 @@ type Provider interface {
 	Usage(ctx context.Context) (Report, error)
 }
 
+func Fetch(ctx context.Context, p Provider) Report {
+	r, err := p.Usage(ctx)
+	if err != nil {
+		r = Report{Provider: p.Name(), Error: err.Error()}
+	}
+	if r.Provider == "" {
+		r.Provider = p.Name()
+	}
+	return r
+}
+
 func Collect(ctx context.Context, providers []Provider) []Report {
 	reports := make([]Report, len(providers))
-	done := make(chan struct{}, len(providers))
+	var wg sync.WaitGroup
 	for i, p := range providers {
-		go func() {
-			defer func() { done <- struct{}{} }()
-			r, err := p.Usage(ctx)
-			if err != nil {
-				r = Report{Provider: p.Name(), Error: err.Error()}
-			}
-			if r.Provider == "" {
-				r.Provider = p.Name()
-			}
-			reports[i] = r
-		}()
+		wg.Go(func() { reports[i] = Fetch(ctx, p) })
 	}
-	for range providers {
-		<-done
-	}
+	wg.Wait()
 	return reports
 }

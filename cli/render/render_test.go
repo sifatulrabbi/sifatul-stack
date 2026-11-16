@@ -31,7 +31,7 @@ func TestTextShowsUsageRemainingResetAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"claude  max", "five_hour", "37% used", "63% left", "resets in 4h05m", "resets in 3d2h", "codex", "error: not logged in"} {
+	for _, want := range []string{"Claude  max", "5-hour", "37% used", " 63% left", "resets in 4h05m", "resets in 3d2h", "Codex", "✗ error: not logged in"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -55,12 +55,29 @@ func TestPrettyJSONKeepsFullReport(t *testing.T) {
 	}
 }
 
-func TestBarClampsOutOfRange(t *testing.T) {
-	if got := bar(150); got != "["+strings.Repeat("#", 20)+"]" {
-		t.Errorf("bar(150) = %s", got)
+func TestWindowLabelsReadAsWords(t *testing.T) {
+	for name, want := range map[string]string{
+		"session":             "Session",
+		"weekly_all":          "Weekly",
+		"weekly_scoped:Fable": "Weekly · Fable",
+		"extra_usage":         "Extra usage",
+		"seven_day_opus":      "Seven day opus",
+	} {
+		if got := label(name); got != want {
+			t.Errorf("label(%q) = %q, want %q", name, got, want)
+		}
 	}
-	if got := bar(-5); got != "["+strings.Repeat(".", 20)+"]" {
-		t.Errorf("bar(-5) = %s", got)
+}
+
+func TestTextAlignsWindowsWithColoredBars(t *testing.T) {
+	var buf bytes.Buffer
+	Text(&buf, reports()[:1], now)
+	lines := strings.Split(buf.String(), "\n")
+	if !strings.HasPrefix(lines[1], "  5-hour  "+strings.Repeat("█", 7)+strings.Repeat("░", 13)+"   37% used   63% left  resets in 4h05m · ") {
+		t.Errorf("window line = %q", lines[1])
+	}
+	if strings.Contains(buf.String(), "\x1b[") {
+		t.Errorf("a buffer got ANSI codes: %q", buf.String())
 	}
 }
 
@@ -82,7 +99,7 @@ func TestTextFlagsStaleCachedReportAndExtras(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"codex  plus  (rollout-cache, as of 2h00m ago)", "credits: 0.00", "reset_credits_available: 3"} {
+	for _, want := range []string{"Codex  plus  stale · rollout-cache, as of 2h00m ago", "credits                  0.00", "reset credits available  3"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -155,7 +172,7 @@ func TestExtrasAreHiddenFromAgentsButShownToHumans(t *testing.T) {
 	}
 	var human bytes.Buffer
 	Text(&human, []usage.Report{r}, now)
-	if !strings.Contains(human.String(), "reset_credits_available: 3") {
+	if !strings.Contains(human.String(), "reset credits available  3") {
 		t.Errorf("text output lost extras:\n%s", human.String())
 	}
 }
@@ -168,7 +185,7 @@ func TestSpendWindowsAreHiddenFromAgentsButShownToHumans(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	Text(&buf, []usage.Report{r}, now)
-	if !strings.Contains(buf.String(), "extra_usage") {
+	if !strings.Contains(buf.String(), "Extra usage") {
 		t.Errorf("text output lost spend window:\n%s", buf.String())
 	}
 }
@@ -206,7 +223,13 @@ func TestTextShowsWeekCostPerModelAndUnpriced(t *testing.T) {
 	var buf bytes.Buffer
 	Text(&buf, []usage.Report{{Provider: "claude", Cost: weekCost()}}, now)
 	out := buf.String()
-	for _, want := range []string{"week cost: $123.46 API-equivalent since", "claude-opus-5-5", "$120.00", "2.5B tokens", "1.5k tokens", "codex-auto-review", "unpriced", "42 tokens", "7 tokens (priced as gpt-6.1-terra)"} {
+	for _, want := range []string{
+		"Week cost  $123.46  API-equivalent since",
+		"    claude-opus-5-5     $120.00  2.5B tokens",
+		"    claude-haiku-5-5      $3.46  1.5k tokens",
+		"    aliased-model         $0.00     7 tokens (priced as gpt-6.1-terra)",
+		"    codex-auto-review  unpriced    42 tokens",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -216,7 +239,7 @@ func TestTextShowsWeekCostPerModelAndUnpriced(t *testing.T) {
 func TestTextShowsWhyWeekCostIsUnavailable(t *testing.T) {
 	var buf bytes.Buffer
 	Text(&buf, []usage.Report{{Provider: "claude", CostError: "litellm prices not installed"}}, now)
-	if !strings.Contains(buf.String(), "week cost: unavailable (litellm prices not installed)") {
+	if !strings.Contains(buf.String(), "Week cost  unavailable (litellm prices not installed)") {
 		t.Errorf("output:\n%s", buf.String())
 	}
 }

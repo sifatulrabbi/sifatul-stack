@@ -127,7 +127,7 @@ func TestCompactJSONSkipsCostScanButHumanViewsComputeIt(t *testing.T) {
 	}
 
 	out, err = run(t, costApp(&calls))
-	if err != nil || calls != 1 || !strings.Contains(out, "week cost: $3.00") {
+	if err != nil || calls != 1 || !strings.Contains(out, "Week cost  $3.00") {
 		t.Fatalf("text: calls = %d, err = %v, out = %s", calls, err, out)
 	}
 
@@ -140,7 +140,7 @@ func TestCompactJSONSkipsCostScanButHumanViewsComputeIt(t *testing.T) {
 func TestPricesUpdateReportsCountAndPath(t *testing.T) {
 	a := app{now: fixedNow, pricesPath: "/cache/prices.json", updatePrices: func(context.Context) (int, error) { return 42, nil }}
 	out, err := run(t, a, "prices", "update")
-	if err != nil || !strings.Contains(out, "installed 42 model prices to /cache/prices.json") {
+	if err != nil || !strings.Contains(out, "installed 42 model prices · /cache/prices.json") {
 		t.Fatalf("out = %q, err = %v", out, err)
 	}
 }
