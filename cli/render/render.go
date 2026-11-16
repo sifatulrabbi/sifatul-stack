@@ -118,7 +118,6 @@ func (v TextView) Text(w io.Writer, reports []usage.Report, now time.Time) error
 				b.WriteString("  " + ui.Muted.Render(note) + "\n")
 			}
 		}
-		b.WriteString(costBlock(r))
 		var extras [][]string
 		for _, k := range slices.Sorted(maps.Keys(r.Extras)) {
 			extras = append(extras, []string{"  " + ui.Muted.Render(strings.ReplaceAll(k, "_", " ")), r.Extras[k]})
@@ -245,61 +244,5 @@ func humanize(d time.Duration) string {
 		return fmt.Sprintf("%dh%02dm", hours, mins)
 	default:
 		return fmt.Sprintf("%dm", mins)
-	}
-}
-
-func costBlock(r usage.Report) string {
-	if r.CostError != "" {
-		return "\n  " + ui.Bold.Render("Week cost") + "  " + ui.Warn.Render("unavailable ("+r.CostError+")") + "\n"
-	}
-	if r.Cost == nil {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "\n  %s  %s  %s\n", ui.Bold.Render("Week cost"), ui.Bold.Render(fmt.Sprintf("$%.2f", r.Cost.USD)),
-		ui.Muted.Render("API-equivalent since "+r.Cost.From.Local().Format("Mon Jan 2 15:04")+" · this machine's logs"))
-	var dollars, tokens []string
-	for _, m := range r.Cost.Models {
-		d := "unpriced"
-		if m.Priced {
-			d = fmt.Sprintf("$%.2f", m.USD)
-		}
-		dollars = append(dollars, d)
-		tokens = append(tokens, compactCount(m.Tokens.Total()))
-	}
-	var rows [][]string
-	for i, m := range r.Cost.Models {
-		t := ui.Muted.Render(padLeft(tokens[i], tokens) + " tokens")
-		if m.PricedAs != "" {
-			t += ui.Muted.Render(" (priced as " + m.PricedAs + ")")
-		}
-		d := padLeft(dollars[i], dollars)
-		if !m.Priced {
-			d = ui.Warn.Render(d)
-		}
-		rows = append(rows, []string{"    " + m.Model, d, t})
-	}
-	b.WriteString(ui.Columns(rows, "  "))
-	return b.String()
-}
-
-func padLeft(s string, column []string) string {
-	width := 0
-	for _, c := range column {
-		width = max(width, len(c))
-	}
-	return strings.Repeat(" ", width-len(s)) + s
-}
-
-func compactCount(n int64) string {
-	switch {
-	case n >= 1_000_000_000:
-		return fmt.Sprintf("%.1fB", float64(n)/1e9)
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(n)/1e6)
-	case n >= 1_000:
-		return fmt.Sprintf("%.1fk", float64(n)/1e3)
-	default:
-		return fmt.Sprint(n)
 	}
 }

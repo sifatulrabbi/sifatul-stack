@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
@@ -263,47 +262,5 @@ func TestSpendWindowSaysWhatItIsAPercentOf(t *testing.T) {
 		if !strings.Contains(buf.String(), tt.want) {
 			t.Errorf("budget %+v: output lacks %q:\n%s", tt.budget, tt.want, buf.String())
 		}
-	}
-}
-
-func weekCost() *cost.Summary {
-	return &cost.Summary{From: now.Add(-3 * 24 * time.Hour), To: now, USD: 123.456, Models: []cost.ModelCost{
-		{Model: "claude-opus-5-5", USD: 120, Priced: true, Tokens: cost.Tokens{CacheRead: 2_500_000_000}},
-		{Model: "claude-haiku-5-5", USD: 3.456, Priced: true, Tokens: cost.Tokens{Output: 1500}},
-		{Model: "aliased-model", USD: 0, Priced: true, PricedAs: "gpt-6.1-terra", Tokens: cost.Tokens{Output: 7}},
-		{Model: "codex-auto-review", Tokens: cost.Tokens{Input: 42}},
-	}}
-}
-
-func TestTextShowsWeekCostPerModelAndUnpriced(t *testing.T) {
-	var buf bytes.Buffer
-	TextView{}.Text(&buf, []usage.Report{{Provider: "claude", Cost: weekCost()}}, now)
-	out := buf.String()
-	for _, want := range []string{
-		"Week cost  $123.46  API-equivalent since",
-		"    claude-opus-5-5     $120.00  2.5B tokens",
-		"    claude-haiku-5-5      $3.46  1.5k tokens",
-		"    aliased-model         $0.00     7 tokens (priced as gpt-6.1-terra)",
-		"    codex-auto-review  unpriced    42 tokens",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output missing %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestTextShowsWhyWeekCostIsUnavailable(t *testing.T) {
-	var buf bytes.Buffer
-	TextView{}.Text(&buf, []usage.Report{{Provider: "claude", CostError: "litellm prices not installed"}}, now)
-	if !strings.Contains(buf.String(), "Week cost  unavailable (litellm prices not installed)") {
-		t.Errorf("output:\n%s", buf.String())
-	}
-}
-
-func TestWeekCostNeverReachesAgentJSON(t *testing.T) {
-	var buf bytes.Buffer
-	JSON(&buf, []usage.Report{{Provider: "claude", Cost: weekCost(), CostError: "x"}}, now)
-	if strings.Contains(buf.String(), "cost") || strings.Contains(buf.String(), "usd") {
-		t.Errorf("agent JSON leaked cost: %s", buf.String())
 	}
 }

@@ -39,19 +39,19 @@ func TestRemainingPercentNeverNegative(t *testing.T) {
 	}
 }
 
-func TestWeeklyWindowIsFirstSevenDayLimitWithAReset(t *testing.T) {
+func TestWeeklyMeansASevenDayLimitWithAReset(t *testing.T) {
 	reset := time.Date(2026, 11, 19, 19, 0, 0, 0, time.UTC)
-	r := Report{Windows: []Window{
-		{Name: "session", WindowMinutes: 300, ResetsAt: &reset},
-		{Name: "weekly_nil_reset", WindowMinutes: 10080},
-		{Name: "weekly_all", WindowMinutes: 10080, ResetsAt: &reset},
-		{Name: "weekly_scoped:Fable", WindowMinutes: 10080, ResetsAt: &reset},
-	}}
-	w, ok := r.WeeklyWindow()
-	if !ok || w.Name != "weekly_all" {
-		t.Fatalf("weekly = %+v, %v", w, ok)
-	}
-	if _, ok := (Report{Windows: []Window{{Name: "session", WindowMinutes: 300, ResetsAt: &reset}}}).WeeklyWindow(); ok {
-		t.Fatal("session-only report has no weekly window")
+	for _, tt := range []struct {
+		w    Window
+		want bool
+	}{
+		{Window{Name: "weekly_all", WindowMinutes: 10080, ResetsAt: &reset}, true},
+		{Window{Name: "session", WindowMinutes: 300, ResetsAt: &reset}, false},
+		{Window{Name: "weekly_nil_reset", WindowMinutes: 10080}, false},
+		{Window{Name: "extra_usage", WindowMinutes: 10080, ResetsAt: &reset, Spend: true}, false},
+	} {
+		if got := tt.w.Weekly(); got != tt.want {
+			t.Errorf("%s: Weekly() = %v, want %v", tt.w.Name, got, tt.want)
+		}
 	}
 }

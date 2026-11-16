@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 	"time"
-
-	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
 )
 
 type Window struct {
@@ -32,30 +30,19 @@ func (w Window) RemainingPercent() float64 {
 }
 
 type Report struct {
-	Provider  string            `json:"provider"`
-	Plan      string            `json:"plan,omitempty"`
-	Source    string            `json:"source,omitempty"`
-	AsOf      *time.Time        `json:"as_of,omitempty"`
-	Stale     bool              `json:"stale,omitempty"`
-	Windows   []Window          `json:"windows"`
-	Extras    map[string]string `json:"extras,omitempty"`
-	Cost      *cost.Summary     `json:"cost,omitempty"`
-	CostError string            `json:"cost_error,omitempty"`
-	Error     string            `json:"error,omitempty"`
+	Provider string            `json:"provider"`
+	Plan     string            `json:"plan,omitempty"`
+	Source   string            `json:"source,omitempty"`
+	AsOf     *time.Time        `json:"as_of,omitempty"`
+	Stale    bool              `json:"stale,omitempty"`
+	Windows  []Window          `json:"windows"`
+	Extras   map[string]string `json:"extras,omitempty"`
+	Error    string            `json:"error,omitempty"`
 }
 
 const weekMinutes = 7 * 24 * 60
 
 func (w Window) Weekly() bool { return w.WindowMinutes == weekMinutes && !w.Spend && w.ResetsAt != nil }
-
-func (r Report) WeeklyWindow() (Window, bool) {
-	for _, w := range r.Windows {
-		if w.Weekly() {
-			return w, true
-		}
-	}
-	return Window{}, false
-}
 
 func (r *Report) SetExtra(key, value string) {
 	if r.Extras == nil {

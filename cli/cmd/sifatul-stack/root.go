@@ -18,14 +18,13 @@ import (
 var (
 	errProviderFailed = errors.New("at least one provider failed")
 	errOutput         = errors.New("write output")
-	errPricesUpdate   = errors.New("update prices")
 )
 
 func exitCode(err error) int {
 	switch {
 	case err == nil:
 		return 0
-	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput), errors.Is(err, errPricesUpdate),
+	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput),
 		errors.Is(err, errStack), errors.Is(err, errConflicts):
 		return 1
 	default:
@@ -34,14 +33,11 @@ func exitCode(err error) int {
 }
 
 type app struct {
-	providers    []usage.Provider
-	now          func() time.Time
-	weekly       weeklyCost
-	updatePrices func(ctx context.Context) (int, error)
-	pricesPath   string
-	stack        stackEnv
-	animate      bool
-	text         render.TextView
+	providers []usage.Provider
+	now       func() time.Time
+	stack     stackEnv
+	animate   bool
+	text      render.TextView
 }
 
 var version = "dev"
@@ -67,10 +63,8 @@ func newUsageCmd(a app) *cobra.Command {
 		Use:   "usage [provider ...]",
 		Short: "Show remaining subscription quota for coding-agent harnesses",
 		Long: fmt.Sprintf("Show remaining subscription quota for coding-agent harnesses.\n\nProviders: %v (default: all).\n\n"+
-			"The table (and --json --pretty) also shows this week's API-equivalent cost, computed from local session logs\n"+
-			"and LiteLLM prices (install them once with `sifatul-stack usage prices update`). Compact --json omits it.\n\n"+
 			"Exit codes: 0 all providers reported, 1 a provider failed (its report carries \"error\"), 2 bad usage.", known),
-		Example:       "  sifatul-stack usage\n  sifatul-stack usage --json\n  sifatul-stack usage codex\n  sifatul-stack usage prices update",
+		Example:       "  sifatul-stack usage\n  sifatul-stack usage --json\n  sifatul-stack usage codex",
 		Args:          cobra.OnlyValidArgs,
 		ValidArgs:     known,
 		SilenceUsage:  true,
@@ -86,14 +80,10 @@ func newUsageCmd(a app) *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 			defer cancel()
 			var reports []usage.Report
-			switch {
-			case !asJSON:
+			if asJSON {
+				reports = usage.Collect(ctx, selected)
+			} else {
 				reports = a.fetchWithProgress(ctx, cmd.OutOrStdout(), selected)
-			case pretty:
-				reports = usage.Collect(ctx, selected)
-				a.weekly.attach(ctx, reports, a.now())
-			default:
-				reports = usage.Collect(ctx, selected)
 			}
 
 			write := a.text.Text
@@ -115,7 +105,6 @@ func newUsageCmd(a app) *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print compact one-line JSON for agents (rounded percents, precomputed resets_in_s)")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "with --json: print the full, indented report (for debugging)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 15*time.Second, "overall timeout")
-	cmd.AddCommand(newPricesCmd(a))
 	return cmd
 }
 
@@ -130,32 +119,7 @@ func (a app) fetchWithProgress(ctx context.Context, w io.Writer, providers []usa
 		}}
 	}
 	progress.Run(ctx, false, tasks...)
-	progress.Run(ctx, false, ui.Task{Label: "reading this week's session logs", Do: func(ctx context.Context) (string, error) {
-		a.weekly.attach(ctx, reports, a.now())
-		return "", nil
-	}})
 	return reports
-}
-
-func newPricesCmd(a app) *cobra.Command {
-	prices := &cobra.Command{
-		Use:   "prices",
-		Short: "Manage the local LiteLLM model price list used for the weekly API-equivalent cost",
-	}
-	prices.AddCommand(&cobra.Command{
-		Use:   "update",
-		Short: "Download LiteLLM's model price list and install it locally",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			n, err := a.updatePrices(cmd.Context())
-			if err != nil {
-				return fmt.Errorf("%w: %w", errPricesUpdate, err)
-			}
-			ui.Print(cmd.OutOrStdout(), ui.OK.Render("✓")+fmt.Sprintf(" installed %d model prices", n)+ui.Muted.Render(" · "+a.pricesPath)+"\n")
-			return nil
-		},
-	})
-	return prices
 }
 
 func names(ps []usage.Provider) []string {

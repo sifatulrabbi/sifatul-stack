@@ -4,7 +4,6 @@ The Go CLI behind sifatul-stack. The stack commands (`setup`, `update`, `status`
 
 ```sh
 make install                # build and install sifatul-stack to ~/.local/bin (or: make install BINDIR=/usr/local/bin)
-sifatul-stack usage prices update # one-time: install LiteLLM model prices for the weekly $ figure
 ```
 
 Other targets: `make build` (to `./bin/sifatul-stack`), `make test`, `make check` (gofmt + vet + race tests), `make uninstall`, `make clean`, `make help`.
@@ -14,7 +13,6 @@ Other targets: `make build` (to `./bin/sifatul-stack`), `make test`, `make check
 ./bin/sifatul-stack usage --json          # compact one-line JSON, for agents
 ./bin/sifatul-stack usage --json --pretty # full indented report, for debugging
 ./bin/sifatul-stack usage codex           # one provider
-./bin/sifatul-stack usage prices update   # install LiteLLM model prices (needed for the weekly $ figure)
 ./bin/sifatul-stack completion zsh        # shell completion (cobra)
 ```
 
@@ -56,30 +54,18 @@ Window names: `session` (5h) and `weekly` for Codex. Claude uses its own `kind` 
 
 `--json --pretty` prints the unrounded domain report (`used_percent`, `window_minutes`, `as_of`, ...) for debugging.
 
-## Weekly API-equivalent cost (human view only)
-
-The table and `--json --pretty` show what this week's tokens would have cost at pay-as-you-go API prices. Compact `--json` leaves it out and skips the log scan entirely.
-
-- **Week:** the provider's weekly limit window, i.e. `resets_at - 7d` until now. Providers without a weekly window get no figure.
-- **Tokens:** read from local logs. Claude: `~/.claude/projects/**/*.jsonl`, deduplicated by message id + request id, with cache writes split into 5-minute and 1-hour tiers. Codex: `~/.codex/sessions/**/rollout-*.jsonl`, using deltas of the running `total_token_usage`, attributed to the model from the latest `turn_context`.
-- **Prices:** LiteLLM's `model_prices_and_context_window.json`, installed with `sifatul-stack usage prices update` into the user cache directory (`~/Library/Caches/sifatul-stack/` on macOS). A download that doesn't parse never replaces the installed file. Models without a price are listed as `unpriced` with their token count, never guessed. Models LiteLLM doesn't list can be mapped to another model's price in `priceAliases` (`cmd/sifatul-stack/main.go`). Today `codex-auto-review` is priced as `gpt-6.1-terra`, and the table marks it `(priced as gpt-6.1-terra)`.
-- **It's a lower bound:** it covers only this machine's logs, so usage from claude.ai web, desktop or mobile, Codex cloud tasks and other machines isn't counted.
-
 ## Environment
 
 - `USAGE_CODEX_BIN`: path to the codex binary (default `codex` on `PATH`)
 - `CODEX_HOME`: Codex home (default `~/.codex`)
-- `CLAUDE_CONFIG_DIR`: Claude Code config dir (default `~/.claude`), used for the transcript logs
 
 ## Layout
 
 - `usage/`: domain (`Report`, `Window`, `Provider` port, `Fetch` and concurrent `Collect`)
-- `claude/`: credential stores (Keychain, file), the usage HTTP adapter, and the transcript token log
-- `codex/`: `SnapshotSource` port with app-server and rollout adapters, normalized via `ToReport`, plus the rollout token log
-- `cost/`: token/price domain (`Entry`, `Price`, `PriceBook` and `Log` ports, `Summarize`)
-- `litellm/`: LiteLLM price list parsing and the local price store (`prices update`)
+- `claude/`: credential stores (Keychain, file) and the usage HTTP adapter
+- `codex/`: `SnapshotSource` port with app-server and rollout adapters, normalized via `ToReport`
 - `render/`: usage text and JSON output, and the stack summary and status views
 - `ui/`: shared Lip Gloss styles, column alignment, and the Bubble Tea progress runner (animated only on a terminal)
-- `cmd/sifatul-stack`: cobra commands (`root.go`), weekly cost attachment (`weekly.go`), and production wiring (`main.go`)
+- `cmd/sifatul-stack`: cobra commands (`root.go`, `stackcmds.go`) and production wiring (`main.go`)
 
 Test fixtures in each package's `testdata/` are real responses captured on 2026-11-16, with identifiers redacted.
