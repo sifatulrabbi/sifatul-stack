@@ -13,6 +13,7 @@ One harness-neutral stack of skills, named sub-agents, and global instructions, 
 
 - The binary carries only logic; the stack content is read at runtime. `setup` clones this repo into `${XDG_DATA_HOME:-~/.local/share}/sifatul-stack/stack` and records it in `state.json` next to it; `update` runs `git pull --ff-only` there and re-syncs. So content changes ship by pushing to `main`; only Go changes need a release.
 - `setup --from <checkout>` links a working copy instead (dev mode); `update` then skips the pull.
+- `state.json` also records the chosen harnesses (`setup --harness`, or the picker in a terminal); no list means all three. Syncing in link mode unlinks unchosen harnesses, status skips them, and `remove` unlinks every harness. `~/.agents/skills` belongs to Codex and OpenCode together, so it stays while either is chosen.
 - `SIFATUL_STACK_REPO` overrides the clone URL (tests and e2e runs).
 
 ## Rules

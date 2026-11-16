@@ -5,12 +5,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sifatulrabbi/sifatul-stack/cli/source"
 	"github.com/sifatulrabbi/sifatul-stack/cli/stack"
+	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 )
 
 type fixture struct {
@@ -150,7 +152,7 @@ func TestSetupClonesAndLinks(t *testing.T) {
 		t.Error("agents were not rendered")
 	}
 	st, err := source.LoadState(f.env.statePath())
-	if err != nil || st != (source.State{Source: f.clone(), Managed: true}) {
+	if err != nil || st.Source != f.clone() || !st.Managed || !slices.Equal(st.Harnesses, stack.Harnesses) {
 		t.Errorf("state = %+v %v", st, err)
 	}
 	if out := f.mustRun("setup"); !strings.Contains(out, "stack · using the clone at ~/.local/share/sifatul-stack/stack") {
@@ -274,4 +276,127 @@ func TestUnknownCommandExitsTwo(t *testing.T) {
 	if _, code := f.run("bogus"); code != 2 {
 		t.Errorf("exit %d, want 2", code)
 	}
+}
+
+func (f fixture) installed(harness string) bool {
+	path := map[string]string{
+		"claude":   filepath.Join(f.env.layout.Claude, "agents", "senior.md"),
+		"codex":    filepath.Join(f.env.layout.Codex, "agents", "senior.toml"),
+		"opencode": filepath.Join(f.env.layout.OpenCode, "agents", "senior.md"),
+	}[harness]
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func (f fixture) installedSet() []string {
+	return slices.DeleteFunc(slices.Clone(stack.Harnesses), func(h string) bool { return !f.installed(h) })
+}
+
+func TestSetupHarnessFlagLimitsTheInstall(t *testing.T) {
+	f := newFixture(t)
+	out := f.mustRun("setup", "--harness", "claude", "--harness", "opencode")
+
+	if got := f.installedSet(); !slices.Equal(got, []string{"claude", "opencode"}) {
+		t.Errorf("installed into %v", got)
+	}
+	if !strings.Contains(out, "stack · installing into Claude Code, OpenCode") {
+		t.Errorf("output lacks the harness line:\n%s", out)
+	}
+	f.mustRun("update")
+	if got := f.installedSet(); !slices.Equal(got, []string{"claude", "opencode"}) {
+		t.Errorf("update widened the install to %v", got)
+	}
+	if out := f.mustRun("status"); !strings.Contains(out, "Harnesses  Claude Code, OpenCode") || strings.Contains(out, "codex") {
+		t.Errorf("status should cover only the chosen harnesses:\n%s", out)
+	}
+}
+
+func TestSetupDroppingAHarnessRemovesIt(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup", "--harness", "claude,codex")
+	f.mustRun("setup", "--harness", "claude")
+
+	if got := f.installedSet(); !slices.Equal(got, []string{"claude"}) {
+		t.Errorf("installed into %v after dropping codex", got)
+	}
+}
+
+func TestSetupWithoutFlagOrTerminalKeepsTheLastChoice(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup", "--harness", "codex")
+	f.mustRun("setup")
+
+	if got := f.installedSet(); !slices.Equal(got, []string{"codex"}) {
+		t.Errorf("installed into %v", got)
+	}
+}
+
+func TestSetupRejectsAnUnknownHarness(t *testing.T) {
+	f := newFixture(t)
+	out, code := f.run("setup", "--harness", "cursor")
+	if code != 2 || !strings.Contains(out, "unknown harness") {
+		t.Errorf("exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(f.env.statePath()); err == nil {
+		t.Error("a rejected setup saved state")
+	}
+}
+
+func TestSetupAsksWhichHarnessesInATerminal(t *testing.T) {
+	f := newFixture(t)
+	var offered []ui.Choice
+	f.env.found = func(h string) bool { return h == "codex" }
+	f.env.choose = func(_ context.Context, choices []ui.Choice) ([]string, error) {
+		offered = choices
+		return []string{"claude"}, nil
+	}
+
+	f.mustRun("setup")
+
+	if len(offered) != 3 {
+		t.Fatalf("offered %+v", offered)
+	}
+	if c := offered[1]; c.Key != "codex" || !c.On || c.Hint != "found" || c.Was || c.Detail != "~/.codex" {
+		t.Errorf("codex choice = %+v; a found harness should start on, with its tilde path", c)
+	}
+	if c := offered[0]; c.On || c.Hint != "not found" {
+		t.Errorf("claude choice = %+v; a harness not found should start off", c)
+	}
+	if got := f.installedSet(); !slices.Equal(got, []string{"claude"}) {
+		t.Errorf("installed into %v", got)
+	}
+
+	f.mustRun("setup")
+	if c := offered[0]; !c.On || !c.Was {
+		t.Errorf("rerun should start from the last choice, got %+v", c)
+	}
+	if c := offered[1]; c.On {
+		t.Errorf("codex was not chosen last time, got %+v", c)
+	}
+}
+
+func TestSetupCanceledChangesNothing(t *testing.T) {
+	f := newFixture(t)
+	f.env.choose = func(context.Context, []ui.Choice) ([]string, error) { return nil, ui.ErrCanceled }
+
+	out, code := f.run("setup")
+
+	if code != 1 || !strings.Contains(out, "nothing changed") {
+		t.Errorf("exit %d:\n%s", code, out)
+	}
+	if got := f.installedSet(); len(got) != 0 {
+		t.Errorf("a canceled setup installed into %v", got)
+	}
+	if _, err := os.Stat(f.clone()); err == nil {
+		t.Error("a canceled setup cloned anyway")
+	}
+}
+
+func TestSetupFlagSkipsThePicker(t *testing.T) {
+	f := newFixture(t)
+	f.env.choose = func(context.Context, []ui.Choice) ([]string, error) {
+		t.Error("the picker ran despite --harness")
+		return nil, nil
+	}
+	f.mustRun("setup", "--harness", "codex")
 }

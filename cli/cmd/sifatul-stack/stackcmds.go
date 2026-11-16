@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ type stackEnv struct {
 	now     func() time.Time
 	animate bool
 	home    string
+	choose  func(ctx context.Context, choices []ui.Choice) ([]string, error)
+	found   func(harness string) bool
 }
 
 func (e stackEnv) tilde(s string) string {
@@ -62,8 +65,8 @@ func (e stackEnv) repo() source.Repo {
 	return source.Repo{Dir: filepath.Join(e.dataDir, "stack"), URL: e.repoURL, Git: e.git}
 }
 
-func (e stackEnv) sync(w io.Writer, src string, mode stack.Mode) error {
-	r, err := stack.Syncer{Source: src, Layout: e.layout, Now: e.now}.Run(mode)
+func (e stackEnv) sync(w io.Writer, st source.State, mode stack.Mode) error {
+	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Now: e.now, Selected: st.Harnesses}.Run(mode)
 	view := render.StackSummary
 	if mode == stack.Status {
 		view = render.StackStatus
@@ -104,34 +107,91 @@ func checkout(dir string) (string, error) {
 
 func newSetupCmd(e stackEnv) *cobra.Command {
 	var from string
+	var harnesses []string
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Install the stack: clone it, link skills and global instructions, render the sub-agents",
-		Long: "Install the stack into Claude Code, Codex, and OpenCode.\n\n" +
+		Long: "Install the stack into Claude Code, Codex, and OpenCode, or the ones you choose.\n\n" +
 			"Clones the stack into the data dir (or uses --from), links skills and global instructions, and renders the named sub-agents. " +
+			"In a terminal, setup asks which harnesses to install into; --harness skips the question, and without either it keeps the last choice (all on a first setup). " +
+			"A harness you drop is cleaned up the same way `sifatul-stack remove` would. " +
 			"An existing global instructions file is backed up first; `sifatul-stack remove` restores it. " +
 			"Anything at a target path that the stack doesn't own is reported as a conflict and left alone.",
-		Args: cobra.NoArgs,
+		Example: "  sifatul-stack setup\n  sifatul-stack setup --harness claude,codex\n  sifatul-stack setup --from ~/projects/sifatul-stack",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w := cmd.OutOrStdout()
+			prev, prevErr := source.LoadState(e.statePath())
+			chosen, err := e.chooseHarnesses(cmd, harnesses, prev, prevErr == nil)
+			if err != nil {
+				return err
+			}
+			e.note(w, ui.OK.Render("✓"), "installing into "+labels(chosen))
 			want, err := e.resolveSource(cmd, from)
 			if err != nil {
 				return fmt.Errorf("%w: %w", errStack, err)
 			}
-			if prev, err := source.LoadState(e.statePath()); err == nil && prev.Source != want.Source {
+			want.Harnesses = chosen
+			if prevErr == nil && prev.Source != want.Source {
 				e.note(w, ui.Warn.Render("•"), "switching from "+prev.Source)
-				if err := e.sync(w, prev.Source, stack.Unlink); err != nil {
+				if err := e.sync(w, prev, stack.Unlink); err != nil {
 					return err
 				}
 			}
 			if err := source.SaveState(e.statePath(), want); err != nil {
 				return fmt.Errorf("%w: %w", errStack, err)
 			}
-			return e.sync(w, want.Source, stack.Link)
+			return e.sync(w, want, stack.Link)
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "use this checkout of the stack instead of a managed clone (edits show up live)")
+	cmd.Flags().StringSliceVar(&harnesses, "harness", nil, "install only into these harnesses: "+strings.Join(stack.Harnesses, ", ")+" (repeat or comma-separate)")
 	return cmd
+}
+
+func labels(harnesses []string) string {
+	out := make([]string, len(harnesses))
+	for i, h := range harnesses {
+		out[i] = stack.HarnessLabel(h)
+	}
+	return strings.Join(out, ", ")
+}
+
+func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source.State, hasPrev bool) ([]string, error) {
+	last := stack.Harnesses
+	if hasPrev && len(prev.Harnesses) > 0 {
+		last = prev.Harnesses
+	}
+	switch {
+	case cmd.Flags().Changed("harness"):
+		return stack.ParseHarnesses(flag)
+	case e.choose == nil:
+		return last, nil
+	}
+	choices := make([]ui.Choice, len(stack.Harnesses))
+	for i, h := range stack.Harnesses {
+		found := e.found != nil && e.found(h)
+		hint := "not found"
+		if found {
+			hint = "found"
+		}
+		on := found
+		if hasPrev {
+			on = slices.Contains(last, h)
+		}
+		choices[i] = ui.Choice{
+			Key: h, Label: stack.HarnessLabel(h), Detail: e.tilde(e.layout.Dir(h)), Hint: hint,
+			On: on, Was: hasPrev && slices.Contains(last, h),
+		}
+	}
+	chosen, err := e.choose(cmd.Context(), choices)
+	if errors.Is(err, ui.ErrCanceled) {
+		return nil, fmt.Errorf("%w: setup canceled; nothing changed", errStack)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errStack, err)
+	}
+	return stack.ParseHarnesses(chosen)
 }
 
 func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, error) {
@@ -194,7 +254,7 @@ func newUpdateCmd(e stackEnv) *cobra.Command {
 			} else {
 				e.note(w, ui.Warn.Render("•"), st.Source+" is your checkout; pull it yourself")
 			}
-			return e.sync(w, st.Source, stack.Link)
+			return e.sync(w, st, stack.Link)
 		},
 	}
 }
@@ -218,8 +278,15 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 			if st.Managed {
 				kind = "managed clone"
 			}
-			e.print(w, ui.Accent.Render("Stack")+"  "+kind+ui.Muted.Render(" · "+st.Source)+"\n\n")
-			return e.sync(w, st.Source, stack.Status)
+			chosen := st.Harnesses
+			if len(chosen) == 0 {
+				chosen = stack.Harnesses
+			}
+			e.print(w, ui.Columns([][]string{
+				{ui.Accent.Render("Stack"), kind + ui.Muted.Render(" · "+st.Source)},
+				{ui.Accent.Render("Harnesses"), labels(chosen)},
+			}, "  ")+"\n")
+			return e.sync(w, st, stack.Status)
 		},
 	}
 }
@@ -235,7 +302,7 @@ func newRemoveCmd(e stackEnv) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := e.sync(w, st.Source, stack.Unlink); err != nil {
+			if err := e.sync(w, st, stack.Unlink); err != nil {
 				return err
 			}
 			if err := os.Remove(e.statePath()); err != nil {
