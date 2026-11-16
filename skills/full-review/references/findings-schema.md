@@ -53,7 +53,8 @@
       "id": "security-1",
       "status": "confirmed",
       "severity": "high",
-      "evidence": "Test in scratch: PATCH /users/2 as user 1 returned 200 and changed user 2's email. Test code: …",
+      "evidence": "Test in scratch: PATCH /users/2 as user 1 returned 200 and changed user 2's email.",
+      "regression_test": "it('rejects PATCH on another user', async () => { … expect(res.status).toBe(403) })",
       "notes": "",
       "duplicate_of": null
     }
@@ -63,4 +64,5 @@
 
 - `status`: `confirmed` | `plausible` | `unproven` | `refuted` | `duplicate`. Only confirmed and plausible reach the user.
 - `severity`: final severity; explain any change in `notes`.
+- `regression_test`: the test code that went red on the bug or mutation, for confirmed bugs and missing tests; empty otherwise.
 - `duplicate_of`: id of the finding kept instead, when status is `duplicate`.

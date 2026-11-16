@@ -40,7 +40,3 @@ Never hard-wrap Markdown -- one paragraph = one line, everywhere: files, plans, 
 - Prefix every new branch with `sifatul/`, worktree branches included.
 - PR descriptions: open with a concise what + why and a few bullets, expand below, stay under 300 words. The diff is a click away. Before editing a PR body you didn't write, get my consent.
 - Never add model or harness attribution anywhere: no Co-Authored-By trailer, no "Generated with" line, no session link. This covers commits, PR bodies, and PR comments. The code belongs to me or the company I wrote it for.
-
-## Herdr
-
-I use herdr extensively for day-to-day work. The `herdr` skill documents its feature set: creating worktrees, spawning agents in panes, cross-agent work.

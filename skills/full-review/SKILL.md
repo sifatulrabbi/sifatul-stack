@@ -67,7 +67,7 @@ Each specialist owns its whole concern area across every file it touches: one jo
 | architecture    | New modules, services or classes; cross-layer imports; moved responsibilities; a new pattern                          |
 | concurrency     | Async code, threads, locks, queues, shared mutable state, retries, timeouts                                           |
 | data-migrations | Schema files, migrations, backfills, ORM models                                                                       |
-| tests           | Any behavior change, or test files                                                                                    |
+| tests           | Any behavior change, or test files: missing regression tests and tests that don't earn their keep                     |
 | maintainability | Substantial new or rewritten code (skip for small fixes)                                                              |
 | performance     | DB queries, loops over collections, request hot paths, caching, batch jobs                                            |
 | api-compat      | Public APIs, exported functions, request/response schemas, events, CLI flags, config formats                          |
@@ -136,6 +136,7 @@ Write `RUN_DIR/review.md` from `final.json` and show it in chat:
 <what's wrong and its impact, 1–3 sentences>
 **Evidence:** <reproduction, or for plausible: the traced path and what couldn't be executed>
 **Fix:** <suggestion>
+**Regression test:** <the verifier's `regression_test`, when present>
 
 ---
 

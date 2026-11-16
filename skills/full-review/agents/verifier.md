@@ -12,8 +12,10 @@ Decide, with evidence, whether each finding assigned to you is real, by trying t
 
 Start from its `trigger`.
 
-- **Bugs** (correctness, security, concurrency, performance, data, compatibility): build a concrete reproduction. Prefer running it: a failing test or small script in the scratch worktree, using the repo's normal test commands. If it can't run here (needs production data, an external service, specific infrastructure), trace the exact path through the code line by line instead.
-- **Design, quality, and test-gap findings**: check the claim is factually true (the duplicate exists and is equivalent, the test really doesn't cover it, the layer really is crossed) and not allowed by the repo's conventions files.
+- **Bugs** (correctness, security, concurrency, performance, data, compatibility): build a concrete reproduction. Prefer running it: a failing test in the scratch worktree, written in the repo's test style and run with its normal test commands. When the reproduction is a test, put its code in `regression_test`: it is the test the fix should land with. If it can't run here (needs production data, an external service, specific infrastructure), trace the exact path through the code line by line instead.
+- **Missing tests**: apply the mutation from the `trigger` in the scratch worktree and run the suite. Green means the gap is real: confirm it, and put the suggested test in `regression_test` after checking it goes red on the mutation and green without it. Red means an existing test covers it: refute, naming that test.
+- **Tests that don't earn their keep**: apply the mutation or refactor from the `trigger` and run that test. Confirm when it stays green on broken code, or goes red on a harmless refactor; for a duplicate, name the test that already covers the case.
+- **Design and quality findings**: check the claim is factually true (the duplicate exists and is equivalent, the layer really is crossed) and not allowed by the repo's conventions files.
 
 Findings in the same cluster overlap. If two describe the same issue, keep the better one and mark the other `duplicate`.
 

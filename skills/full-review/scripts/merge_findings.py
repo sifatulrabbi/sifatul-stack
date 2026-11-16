@@ -154,6 +154,7 @@ def final(run):
                     status=status,
                     severity=r.get("severity", f["severity"]),
                     verification=r.get("evidence", ""),
+                    regression_test=r.get("regression_test", ""),
                     verifier_notes=r.get("notes", ""),
                 )
             )
