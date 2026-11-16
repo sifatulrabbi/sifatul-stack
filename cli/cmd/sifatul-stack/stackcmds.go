@@ -1,22 +1,26 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/sifatulrabbi/sifatul-stack/cli/render"
 	"github.com/sifatulrabbi/sifatul-stack/cli/source"
 	"github.com/sifatulrabbi/sifatul-stack/cli/stack"
+	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 )
 
 var (
 	errStack     = errors.New("stack")
-	errConflicts = errors.New("conflicts left untouched; resolve them and rerun")
+	errConflicts = errors.New("resolve the conflicts above and rerun")
 )
 
 type stackEnv struct {
@@ -25,6 +29,31 @@ type stackEnv struct {
 	repoURL string
 	git     source.Git
 	now     func() time.Time
+	animate bool
+	home    string
+}
+
+func (e stackEnv) tilde(s string) string {
+	if e.home == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, e.home+string(filepath.Separator), "~"+string(filepath.Separator))
+}
+
+func (e stackEnv) print(w io.Writer, s string) error { return ui.Print(w, e.tilde(s)) }
+
+func (e stackEnv) progress(w io.Writer) ui.Progress { return ui.Progress{Out: w, Animate: e.animate} }
+
+func (e stackEnv) note(w io.Writer, glyph, msg string) {
+	e.print(w, glyph+" stack"+ui.Muted.Render(" · ")+msg+"\n")
+}
+
+func (e stackEnv) step(cmd *cobra.Command, do func(ctx context.Context) (string, error)) error {
+	res := e.progress(cmd.OutOrStdout()).Run(cmd.Context(), true, ui.Task{Label: "stack", Do: func(ctx context.Context) (string, error) {
+		detail, err := do(ctx)
+		return e.tilde(detail), err
+	}})
+	return res[0].Err
 }
 
 func (e stackEnv) statePath() string { return filepath.Join(e.dataDir, "state.json") }
@@ -35,14 +64,18 @@ func (e stackEnv) repo() source.Repo {
 
 func (e stackEnv) sync(w io.Writer, src string, mode stack.Mode) error {
 	r, err := stack.Syncer{Source: src, Layout: e.layout, Now: e.now}.Run(mode)
-	for _, row := range r.Rows {
-		fmt.Fprintf(w, "%-12s %-14s %-9s %s\n", row.Kind, row.Name, row.Harness, row.State)
+	view := render.StackSummary
+	if mode == stack.Status {
+		view = render.StackStatus
+	}
+	if werr := e.print(w, view(r.Rows)); werr != nil {
+		return fmt.Errorf("%w: %w", errOutput, werr)
 	}
 	if err != nil {
 		return fmt.Errorf("%w: %w", errStack, err)
 	}
-	if n := r.Conflicts(); n > 0 {
-		return fmt.Errorf("%d %w", n, errConflicts)
+	if r.Conflicts() > 0 {
+		return errConflicts
 	}
 	return nil
 }
@@ -86,7 +119,7 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 				return fmt.Errorf("%w: %w", errStack, err)
 			}
 			if prev, err := source.LoadState(e.statePath()); err == nil && prev.Source != want.Source {
-				fmt.Fprintf(w, "stack: switching from %s\n", prev.Source)
+				e.note(w, ui.Warn.Render("•"), "switching from "+prev.Source)
 				if err := e.sync(w, prev.Source, stack.Unlink); err != nil {
 					return err
 				}
@@ -102,24 +135,28 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 }
 
 func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, error) {
-	w := cmd.OutOrStdout()
 	if from != "" {
 		dir, err := checkout(from)
 		if err != nil {
 			return source.State{}, err
 		}
-		fmt.Fprintf(w, "stack: using your checkout at %s\n", dir)
+		e.note(cmd.OutOrStdout(), ui.OK.Render("✓"), "using your checkout at "+dir)
 		return source.State{Source: dir}, nil
 	}
 	repo := e.repo()
-	cloned, err := repo.Ensure(cmd.Context())
+	err := e.step(cmd, func(ctx context.Context) (string, error) {
+		cloned, err := repo.Ensure(ctx)
+		switch {
+		case err != nil:
+			return "", err
+		case cloned:
+			return "cloned " + repo.URL + " into " + repo.Dir, nil
+		default:
+			return "using the clone at " + repo.Dir, nil
+		}
+	})
 	if err != nil {
 		return source.State{}, err
-	}
-	if cloned {
-		fmt.Fprintf(w, "stack: cloned %s into %s\n", repo.URL, repo.Dir)
-	} else {
-		fmt.Fprintf(w, "stack: using the clone at %s\n", repo.Dir)
 	}
 	dir, err := checkout(repo.Dir)
 	if err != nil {
@@ -140,17 +177,22 @@ func newUpdateCmd(e stackEnv) *cobra.Command {
 				return err
 			}
 			if st.Managed {
-				change, err := source.Repo{Dir: st.Source, Git: e.git}.Pull(cmd.Context())
+				err := e.step(cmd, func(ctx context.Context) (string, error) {
+					change, err := source.Repo{Dir: st.Source, Git: e.git}.Pull(ctx)
+					switch {
+					case err != nil:
+						return "", err
+					case change.Updated():
+						return "updated " + change.From + " → " + change.To, nil
+					default:
+						return "already up to date at " + change.To, nil
+					}
+				})
 				if err != nil {
 					return fmt.Errorf("%w: %w", errStack, err)
 				}
-				if change.Updated() {
-					fmt.Fprintf(w, "stack: updated %s..%s\n", change.From, change.To)
-				} else {
-					fmt.Fprintf(w, "stack: already up to date at %s\n", change.To)
-				}
 			} else {
-				fmt.Fprintf(w, "stack: %s is your checkout; pull it yourself\n", st.Source)
+				e.note(w, ui.Warn.Render("•"), st.Source+" is your checkout; pull it yourself")
 			}
 			return e.sync(w, st.Source, stack.Link)
 		},
@@ -166,7 +208,7 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 			w := cmd.OutOrStdout()
 			st, err := source.LoadState(e.statePath())
 			if errors.Is(err, source.ErrNotSetUp) {
-				fmt.Fprintln(w, "stack: not set up; run `sifatul-stack setup`")
+				e.note(w, ui.Warn.Render("•"), "not set up; run `sifatul-stack setup`")
 				return nil
 			}
 			if err != nil {
@@ -176,7 +218,7 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 			if st.Managed {
 				kind = "managed clone"
 			}
-			fmt.Fprintf(w, "stack: %s (%s)\n", st.Source, kind)
+			e.print(w, ui.Accent.Render("Stack")+"  "+kind+ui.Muted.Render(" · "+st.Source)+"\n\n")
 			return e.sync(w, st.Source, stack.Status)
 		},
 	}
@@ -200,7 +242,7 @@ func newRemoveCmd(e stackEnv) *cobra.Command {
 				return fmt.Errorf("%w: %w", errStack, err)
 			}
 			if st.Managed {
-				fmt.Fprintf(w, "stack: removed; the clone at %s stays for the next setup\n", st.Source)
+				e.note(w, ui.OK.Render("✓"), "removed; the clone at "+st.Source+" stays for the next setup")
 			}
 			return nil
 		},

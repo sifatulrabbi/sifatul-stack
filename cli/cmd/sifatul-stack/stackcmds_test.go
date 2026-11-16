@@ -91,6 +91,7 @@ func newFixture(t *testing.T) fixture {
 		repoURL: up,
 		git:     source.ExecGit,
 		now:     func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) },
+		home:    home,
 	}}
 }
 
@@ -139,7 +140,7 @@ func TestSetupClonesAndLinks(t *testing.T) {
 	f := newFixture(t)
 	out := f.mustRun("setup")
 
-	if !strings.Contains(out, "stack: cloned "+f.upstream) {
+	if !strings.Contains(out, "stack · cloned "+f.upstream) {
 		t.Errorf("output lacks the clone line:\n%s", out)
 	}
 	if got := linkTarget(t, filepath.Join(f.env.layout.Claude, "skills", "full-review")); got != filepath.Join(f.clone(), "skills", "full-review") {
@@ -152,7 +153,7 @@ func TestSetupClonesAndLinks(t *testing.T) {
 	if err != nil || st != (source.State{Source: f.clone(), Managed: true}) {
 		t.Errorf("state = %+v %v", st, err)
 	}
-	if out := f.mustRun("setup"); !strings.Contains(out, "stack: using the clone at") {
+	if out := f.mustRun("setup"); !strings.Contains(out, "stack · using the clone at ~/.local/share/sifatul-stack/stack") {
 		t.Errorf("second setup should reuse the clone:\n%s", out)
 	}
 }
@@ -171,7 +172,7 @@ func TestUpdatePullsAndResyncs(t *testing.T) {
 
 	out := f.mustRun("update")
 
-	if !strings.Contains(out, "stack: updated ") {
+	if !strings.Contains(out, "stack · updated ") {
 		t.Errorf("output lacks the update line:\n%s", out)
 	}
 	if got := linkTarget(t, filepath.Join(f.env.layout.AgentsSkills, "fresh")); got != filepath.Join(f.clone(), "skills", "fresh") {
@@ -183,7 +184,7 @@ func TestUpdatePullsAndResyncs(t *testing.T) {
 	if !strings.Contains(readFile(t, filepath.Join(f.env.layout.Claude, "agents", "senior.md")), "\nmodel: opus-next\n") {
 		t.Error("senior was not re-rendered")
 	}
-	if out := f.mustRun("update"); !strings.Contains(out, "stack: already up to date") {
+	if out := f.mustRun("update"); !strings.Contains(out, "stack · already up to date") {
 		t.Errorf("second update:\n%s", out)
 	}
 }
@@ -231,7 +232,7 @@ func TestSetupSwitchesSources(t *testing.T) {
 	f.mustRun("setup", "--from", f.upstream)
 	out := f.mustRun("setup")
 
-	if !strings.Contains(out, "stack: switching from "+f.upstream) {
+	if !strings.Contains(out, "stack · switching from "+f.upstream) {
 		t.Errorf("output lacks the switch line:\n%s", out)
 	}
 	if got := linkTarget(t, filepath.Join(f.env.layout.Claude, "skills", "full-review")); got != filepath.Join(f.clone(), "skills", "full-review") {
@@ -263,7 +264,7 @@ func TestSetupReportsConflictsWithExitOne(t *testing.T) {
 	writeFile(t, filepath.Join(f.env.layout.Claude, "agents", "senior.md"), "mine\n")
 
 	out, code := f.run("setup")
-	if code != 1 || !strings.Contains(out, "is not managed by sifatul-stack") {
+	if code != 1 || !strings.Contains(out, "! 1 conflict, left alone") || !strings.Contains(out, "agent senior · claude  ~/.claude/agents/senior.md is not managed by sifatul-stack") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 }

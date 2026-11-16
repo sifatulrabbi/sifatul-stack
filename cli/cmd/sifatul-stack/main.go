@@ -3,25 +3,26 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/sifatulrabbi/sifatul-stack/cli/claude"
 	"github.com/sifatulrabbi/sifatul-stack/cli/codex"
 	"github.com/sifatulrabbi/sifatul-stack/cli/cost"
 	"github.com/sifatulrabbi/sifatul-stack/cli/litellm"
 	"github.com/sifatulrabbi/sifatul-stack/cli/source"
 	"github.com/sifatulrabbi/sifatul-stack/cli/stack"
+	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
 func main() {
 	err := newRootCmd(defaultApp()).ExecuteContext(context.Background())
 	if err != nil && !errors.Is(err, errProviderFailed) {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		ui.Print(os.Stderr, ui.Bad.Render("✗ error:")+" "+err.Error()+"\n")
 	}
 	os.Exit(exitCode(err))
 }
@@ -38,6 +39,7 @@ func defaultApp() app {
 	}
 	store := litellm.Store{Path: filepath.Join(cacheDir, "sifatul-stack", "litellm_prices.json")}
 	codexDir := envOr("CODEX_HOME", filepath.Join(home, ".codex"))
+	animate := term.IsTerminal(os.Stdout.Fd()) && os.Getenv("TERM") != "dumb"
 	claudeDir := envOr("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 
 	return app{
@@ -60,12 +62,15 @@ func defaultApp() app {
 			return store.Update(ctx, &http.Client{Timeout: 60 * time.Second}, litellm.DefaultURL)
 		},
 		pricesPath: store.Path,
+		animate:    animate,
 		stack: stackEnv{
 			layout:  stack.LayoutFromEnv(home, os.Getenv),
 			dataDir: filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(home, ".local", "share")), "sifatul-stack"),
 			repoURL: envOr("SIFATUL_STACK_REPO", source.DefaultURL),
 			git:     source.ExecGit,
 			now:     time.Now,
+			animate: animate,
+			home:    home,
 		},
 	}
 }

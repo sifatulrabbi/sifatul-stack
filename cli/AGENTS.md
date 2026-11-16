@@ -12,7 +12,7 @@ Go CLI that installs and updates the stack (`stack/`, `source/`; see the root `A
 
 ## Audience split (product decision)
 
-Compact `--json` is the agent view and stays minimal: limit windows only, whole-number percents, precomputed `left` and `resets_in_s`. Spend windows (`Window.Spend`, e.g. Claude `extra_usage`), `extras`, and the weekly `$` cost are human-only, so they belong in the text table and `--json --pretty`. Compact `--json` skips the cost log scan entirely.
+Styling is for people: `ui.Progress` animates only when stdout is a terminal (decided once in `main.go`), and `ui.Print` downsamples colors to what the writer supports, so pipes, agents, and tests always get plain text. Compact `--json` is the agent view and stays minimal: limit windows only, whole-number percents, precomputed `left` and `resets_in_s`. Spend windows (`Window.Spend`, e.g. Claude `extra_usage`), `extras`, and the weekly `$` cost are human-only, so they belong in the text table and `--json --pretty`. Compact `--json` skips the cost log scan entirely.
 
 ## Vendor facts
 

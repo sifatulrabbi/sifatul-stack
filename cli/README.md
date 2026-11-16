@@ -18,6 +18,8 @@ Other targets: `make build` (to `./bin/sifatul-stack`), `make test`, `make check
 ./bin/sifatul-stack completion zsh        # shell completion (cobra)
 ```
 
+In a terminal the table is styled with Lip Gloss and spinners show while providers and session logs load. Piped, redirected, or with `NO_COLOR` set, it prints the same layout as plain text with no escape codes.
+
 Exit code: `0` all providers reported, `1` at least one provider failed (its report carries `error`), `2` bad usage.
 
 ## How each provider is read
@@ -71,12 +73,13 @@ The table and `--json --pretty` show what this week's tokens would have cost at 
 
 ## Layout
 
-- `usage/`: domain (`Report`, `Window`, `Provider` port, concurrent `Collect`)
+- `usage/`: domain (`Report`, `Window`, `Provider` port, `Fetch` and concurrent `Collect`)
 - `claude/`: credential stores (Keychain, file), the usage HTTP adapter, and the transcript token log
 - `codex/`: `SnapshotSource` port with app-server and rollout adapters, normalized via `ToReport`, plus the rollout token log
 - `cost/`: token/price domain (`Entry`, `Price`, `PriceBook` and `Log` ports, `Summarize`)
 - `litellm/`: LiteLLM price list parsing and the local price store (`prices update`)
-- `render/`: text and JSON output
+- `render/`: usage text and JSON output, and the stack summary and status views
+- `ui/`: shared Lip Gloss styles, column alignment, and the Bubble Tea progress runner (animated only on a terminal)
 - `cmd/sifatul-stack`: cobra commands (`root.go`), weekly cost attachment (`weekly.go`), and production wiring (`main.go`)
 
 Test fixtures in each package's `testdata/` are real responses captured on 2026-11-16, with identifiers redacted.

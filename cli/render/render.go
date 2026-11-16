@@ -8,9 +8,9 @@ import (
 	"math"
 	"slices"
 	"strings"
-	"text/tabwriter"
 	"time"
 
+	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
@@ -86,40 +86,78 @@ func utcSecond(t time.Time) string {
 }
 
 func Text(w io.Writer, reports []usage.Report, now time.Time) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	for _, r := range reports {
-		header := r.Provider
-		if r.Plan != "" {
-			header += "  " + r.Plan
+	var b strings.Builder
+	for i, r := range reports {
+		if i > 0 {
+			b.WriteString("\n")
 		}
-		if r.Stale && r.AsOf != nil {
-			header += "  (" + r.Source + ", as of " + humanize(now.Sub(*r.AsOf)) + " ago)"
-		}
-		fmt.Fprintln(tw, header)
+		b.WriteString(header(r, now) + "\n")
 		if r.Error != "" {
-			fmt.Fprintf(tw, "  error: %s\n", r.Error)
+			b.WriteString("  " + ui.Bad.Render("✗ error: "+r.Error) + "\n")
 			continue
 		}
 		if len(r.Windows) == 0 {
-			fmt.Fprintln(tw, "  no active limits reported")
+			b.WriteString("  " + ui.Muted.Render("no active limits reported") + "\n")
 		}
+		var rows [][]string
 		for _, win := range r.Windows {
-			fmt.Fprintf(tw, "  %s\t%s\t%3.0f%% used\t%3.0f%% left\t%s\n",
-				win.Name, bar(win.UsedPercent), win.UsedPercent, win.RemainingPercent(), windowNote(win, now))
+			rows = append(rows, []string{
+				"  " + label(win.Name),
+				ui.Bar(win.UsedPercent, 20),
+				ui.Muted.Render(fmt.Sprintf("%3.0f%% used", win.UsedPercent)),
+				ui.Level(win.UsedPercent).Bold(true).Render(fmt.Sprintf("%3.0f%% left", win.RemainingPercent())),
+				ui.Muted.Render(windowNote(win, now)),
+			})
 		}
-		writeCost(tw, r)
+		b.WriteString(ui.Columns(rows, "  "))
+		b.WriteString(costBlock(r))
+		var extras [][]string
 		for _, k := range slices.Sorted(maps.Keys(r.Extras)) {
-			fmt.Fprintf(tw, "  %s: %s\n", k, r.Extras[k])
+			extras = append(extras, []string{"  " + ui.Muted.Render(strings.ReplaceAll(k, "_", " ")), r.Extras[k]})
 		}
+		b.WriteString(ui.Columns(extras, "  "))
 	}
-	return tw.Flush()
+	return ui.Print(w, b.String())
 }
 
-func bar(used float64) string {
-	const width = 20
-	filled := int(used/100*width + 0.5)
-	filled = max(0, min(width, filled))
-	return "[" + strings.Repeat("#", filled) + strings.Repeat(".", width-filled) + "]"
+func header(r usage.Report, now time.Time) string {
+	h := ui.Accent.Render(capitalize(r.Provider))
+	if r.Plan != "" {
+		h += "  " + r.Plan
+	}
+	if r.Stale && r.AsOf != nil {
+		h += "  " + ui.Warn.Render("stale · "+r.Source+", as of "+humanize(now.Sub(*r.AsOf))+" ago")
+	}
+	return h
+}
+
+var windowLabels = map[string]string{
+	"session":       "Session",
+	"weekly":        "Weekly",
+	"weekly_all":    "Weekly",
+	"weekly_scoped": "Weekly",
+	"five_hour":     "5-hour",
+	"seven_day":     "7-day",
+	"extra_usage":   "Extra usage",
+}
+
+func label(name string) string {
+	base, scope, scoped := strings.Cut(name, ":")
+	l, ok := windowLabels[base]
+	if !ok {
+		l = capitalize(strings.ReplaceAll(base, "_", " "))
+	}
+	if scoped {
+		l += " · " + scope
+	}
+	return l
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func windowNote(win usage.Window, now time.Time) string {
@@ -149,7 +187,7 @@ func resets(at *time.Time, now time.Time) string {
 	if d <= 0 {
 		return "reset due"
 	}
-	return "resets in " + humanize(d) + " (" + at.Local().Format("Mon 15:04") + ")"
+	return "resets in " + humanize(d) + " · " + at.Local().Format("Mon 15:04")
 }
 
 func humanize(d time.Duration) string {
@@ -167,24 +205,47 @@ func humanize(d time.Duration) string {
 	}
 }
 
-func writeCost(w io.Writer, r usage.Report) {
+func costBlock(r usage.Report) string {
 	if r.CostError != "" {
-		fmt.Fprintf(w, "  week cost: unavailable (%s)\n", r.CostError)
-		return
+		return "\n  " + ui.Bold.Render("Week cost") + "  " + ui.Warn.Render("unavailable ("+r.CostError+")") + "\n"
 	}
 	if r.Cost == nil {
-		return
+		return ""
 	}
-	fmt.Fprintf(w, "  week cost: $%.2f API-equivalent since %s, this machine's logs\n", r.Cost.USD, r.Cost.From.Local().Format("Mon Jan 2 15:04"))
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n  %s  %s  %s\n", ui.Bold.Render("Week cost"), ui.Bold.Render(fmt.Sprintf("$%.2f", r.Cost.USD)),
+		ui.Muted.Render("API-equivalent since "+r.Cost.From.Local().Format("Mon Jan 2 15:04")+" · this machine's logs"))
+	var dollars, tokens []string
 	for _, m := range r.Cost.Models {
-		if m.Priced && m.PricedAs != "" {
-			fmt.Fprintf(w, "    %s\t$%.2f\t%s tokens (priced as %s)\n", m.Model, m.USD, compactCount(m.Tokens.Total()), m.PricedAs)
-		} else if m.Priced {
-			fmt.Fprintf(w, "    %s\t$%.2f\t%s tokens\n", m.Model, m.USD, compactCount(m.Tokens.Total()))
-		} else {
-			fmt.Fprintf(w, "    %s\tunpriced\t%s tokens\n", m.Model, compactCount(m.Tokens.Total()))
+		d := "unpriced"
+		if m.Priced {
+			d = fmt.Sprintf("$%.2f", m.USD)
 		}
+		dollars = append(dollars, d)
+		tokens = append(tokens, compactCount(m.Tokens.Total()))
 	}
+	var rows [][]string
+	for i, m := range r.Cost.Models {
+		t := ui.Muted.Render(padLeft(tokens[i], tokens) + " tokens")
+		if m.PricedAs != "" {
+			t += ui.Muted.Render(" (priced as " + m.PricedAs + ")")
+		}
+		d := padLeft(dollars[i], dollars)
+		if !m.Priced {
+			d = ui.Warn.Render(d)
+		}
+		rows = append(rows, []string{"    " + m.Model, d, t})
+	}
+	b.WriteString(ui.Columns(rows, "  "))
+	return b.String()
+}
+
+func padLeft(s string, column []string) string {
+	width := 0
+	for _, c := range column {
+		width = max(width, len(c))
+	}
+	return strings.Repeat(" ", width-len(s)) + s
 }
 
 func compactCount(n int64) string {
