@@ -9,10 +9,11 @@ You are the lead. You triage the change, decide which specialists run, launch th
 
 Run this from a `deep` session. Every agent launch names a model tier, never a model, so the skill works in any harness. Map each tier to whatever your harness offers:
 
-| Tier       | Use                                                 | Models                            |
-| ---------- | --------------------------------------------------- | --------------------------------- |
-| `deep`     | The lead, high-risk specialists, high-stakes checks | Opus, gpt-6.1-sol, or similar     |
-| `standard` | Everything else                                     | Sonnet, gpt-6.1-terra, or similar |
+| Tier       | Use                                                 | Models                    |
+| ---------- | --------------------------------------------------- | ------------------------- |
+| `deep`     | The lead, high-risk specialists, high-stakes checks | Opus, Sol, or similar     |
+| `standard` | Everything else                                     | Sonnet, Terra, or similar |
+| `fast`     | The scout that gathers context for each job         | Haiku, Luna, or similar   |
 
 If the harness can't set a model per agent, use the session model.
 
@@ -78,7 +79,7 @@ If the risk map shows a concern no specialist covers (billing math, a specific f
 
 ## 4. Launch specialists
 
-First, use the scout to gather facts for each job (callers and importers of changed symbols, related tests, interface definitions) into `RUN_DIR/jobs/<job>-context.md`. Facts only: paths, line ranges, snippets.
+First, launch a `fast` scout to gather facts for each job (callers and importers of changed symbols, related tests, interface definitions) into `RUN_DIR/jobs/<job>-context.md`. Facts only: paths, line ranges, snippets.
 
 Then write `RUN_DIR/jobs/<job>.md` for each specialist:
 
