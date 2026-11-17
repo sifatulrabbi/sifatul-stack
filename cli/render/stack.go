@@ -15,24 +15,38 @@ var kinds = []struct{ kind, title, verb string }{
 	{"agent", "Sub-agents", "rendered for"},
 }
 
-var changeOrder = []struct{ change, glyph, label string }{
-	{"linked", "+", "new"},
-	{"written", "+", "new"},
-	{"re-rendered", "~", "re-rendered"},
-	{"backed up", "•", "backed up"},
-	{"restored", "•", "restored"},
-	{"pruned", "−", "pruned"},
-	{"removed", "−", "removed"},
+var changeOrder = []struct {
+	change       stack.Change
+	glyph, label string
+}{
+	{stack.DidLink, "+", "new"},
+	{stack.DidWrite, "+", "new"},
+	{stack.DidRerender, "~", "re-rendered"},
+	{stack.DidReplace, "~", "replaced"},
+	{stack.DidPrune, "−", "pruned"},
+	{stack.DidRemove, "−", "removed"},
 }
 
 const listLimit = 6
 
+func safeRows(rows []stack.Row) []stack.Row {
+	out := make([]stack.Row, len(rows))
+	for i, r := range rows {
+		r.Kind, r.Name, r.Harness, r.Detail = ui.Safe(r.Kind), ui.Safe(r.Name), ui.Safe(r.Harness), ui.Safe(r.Detail)
+		out[i] = r
+	}
+	return out
+}
+
 func StackSummary(rows []stack.Row) string {
+	rows = safeRows(rows)
 	var table [][]string
 	for _, k := range kinds {
-		ofKind := filterRows(rows, func(r stack.Row) bool { return r.Kind == k.kind && !r.Conflict })
+		ofKind := filterRows(rows, func(r stack.Row) bool { return r.Kind == k.kind && r.State != stack.Failed })
 		var lines []string
-		if live := filterRows(ofKind, func(r stack.Row) bool { return !slices.Contains([]string{"removed", "pruned", "restored"}, r.Change) }); len(live) > 0 {
+		if live := filterRows(ofKind, func(r stack.Row) bool {
+			return !slices.Contains([]stack.Change{stack.DidRemove, stack.DidPrune}, r.Change)
+		}); len(live) > 0 {
 			l := ui.OK.Render("✓") + " "
 			if k.kind != "instructions" {
 				l += fmt.Sprintf("%d ", len(unique(live, func(r stack.Row) string { return r.Name })))
@@ -51,9 +65,9 @@ func StackSummary(rows []stack.Row) string {
 			lines = append(lines, style.Render(c.glyph)+" "+c.label+"  "+changedItems(k.kind, ofKind, changed))
 		}
 		if k.kind == "agent" {
-			off := filterRows(ofKind, func(r stack.Row) bool { return strings.HasPrefix(r.State, "off,") })
-			if len(off) > 0 {
-				lines = append(lines, ui.Muted.Render(fmt.Sprintf("○ %d off in OpenCode; delete `disabled: true` from one to switch it on", len(off))))
+			off := filterRows(ofKind, func(r stack.Row) bool { return r.Enabled != nil && !*r.Enabled })
+			for _, key := range unique(off, func(r stack.Row) string { return r.Harness }) {
+				lines = append(lines, ui.Muted.Render(offLine(key, len(filterRows(off, func(r stack.Row) bool { return r.Harness == key })))))
 			}
 		}
 		for i, l := range lines {
@@ -64,10 +78,11 @@ func StackSummary(rows []stack.Row) string {
 			table = append(table, []string{title, l})
 		}
 	}
-	return ui.Columns(table, "  ") + conflicts(rows)
+	return ui.Columns(table, "  ") + failures(rows)
 }
 
 func StackStatus(rows []stack.Row) string {
+	rows = safeRows(rows)
 	var table [][]string
 	needsUpdate := false
 	for _, k := range kinds {
@@ -100,7 +115,7 @@ func StackStatus(rows []stack.Row) string {
 		}
 	}
 	out := ui.Columns(table, "   ")
-	if c := conflicts(rows); c != "" {
+	if c := failures(rows); c != "" {
 		out += "\n" + c
 	}
 	if needsUpdate {
@@ -110,42 +125,34 @@ func StackStatus(rows []stack.Row) string {
 }
 
 func cell(r stack.Row) (string, bool) {
-	state, prefix := r.State, ""
-	if on, rest, ok := strings.Cut(state, ", "); ok && (on == "on" || on == "off") {
-		state, prefix = rest, on
-	}
 	switch {
-	case r.Conflict:
-		return ui.Bad.Render("! conflict"), false
-	case strings.HasPrefix(state, "missing"):
+	case r.State == stack.Failed:
+		return ui.Bad.Render("! failed"), false
+	case r.State == stack.Missing:
 		return ui.Bad.Render("✗ missing"), true
-	case state == "stale":
+	case r.State == stack.Stale:
 		return ui.Warn.Render("~ stale"), true
-	case state == "dangling" || state == "orphaned":
-		return ui.Warn.Render("− " + state), true
-	case prefix == "off":
+	case r.State == stack.Dangling || r.State == stack.Orphaned:
+		return ui.Warn.Render("− " + string(r.State)), true
+	case r.Enabled != nil && !*r.Enabled:
 		return ui.Muted.Render("○ off"), false
-	case prefix == "on":
+	case r.Enabled != nil:
 		return ui.OK.Render("✓ on"), false
 	default:
-		return ui.OK.Render("✓ " + state), false
+		return ui.OK.Render("✓ " + string(r.State)), false
 	}
 }
 
-func conflicts(rows []stack.Row) string {
-	bad := filterRows(rows, func(r stack.Row) bool { return r.Conflict })
+func failures(rows []stack.Row) string {
+	bad := filterRows(rows, func(r stack.Row) bool { return r.State == stack.Failed })
 	if len(bad) == 0 {
 		return ""
 	}
-	noun := "conflict"
-	if len(bad) > 1 {
-		noun += "s"
-	}
 	var table [][]string
 	for _, r := range bad {
-		table = append(table, []string{"  " + r.Kind + " " + r.Name + ui.Muted.Render(" · "+harnessOf(r)), strings.TrimPrefix(r.State, "conflict: ")})
+		table = append(table, []string{"  " + r.Kind + " " + r.Name + ui.Muted.Render(" · "+harnessOf(r)), r.Detail})
 	}
-	return ui.Bad.Render(fmt.Sprintf("! %d %s, left alone", len(bad), noun)) + "\n" + ui.Columns(table, "  ")
+	return ui.Bad.Render(fmt.Sprintf("! %d failed", len(bad))) + "\n" + ui.Columns(table, "  ")
 }
 
 func changedItems(kind string, all, changed []stack.Row) string {
@@ -153,9 +160,8 @@ func changedItems(kind string, all, changed []stack.Row) string {
 	if kind == "instructions" {
 		for _, r := range changed {
 			item := harnessOf(r)
-			if r.Change == "backed up" || r.Change == "restored" {
-				f := strings.Fields(r.State)
-				item += ui.Muted.Render(" (" + f[len(f)-1] + ")")
+			if r.Detail != "" {
+				item += ui.Muted.Render(" (" + r.Detail + ")")
 			}
 			items = append(items, item)
 		}
@@ -173,6 +179,14 @@ func changedItems(kind string, all, changed []stack.Row) string {
 		items = append(items[:listLimit], ui.Muted.Render(fmt.Sprintf("and %d more", len(items)-listLimit)))
 	}
 	return strings.Join(items, ", ")
+}
+
+func offLine(key string, n int) string {
+	line := fmt.Sprintf("○ %d off in %s", n, stack.HarnessLabel(key))
+	if h, err := stack.Find(key); err == nil && h.SwitchOn != "" {
+		line += "; " + h.SwitchOn
+	}
+	return line
 }
 
 func harnessOf(r stack.Row) string { return stack.HarnessLabel(r.Harness) }

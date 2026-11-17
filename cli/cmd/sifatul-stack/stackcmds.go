@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -21,21 +20,17 @@ import (
 
 const brand = "sifatul-stack"
 
-var (
-	errStack     = errors.New("stack")
-	errConflicts = errors.New("resolve the conflicts above and rerun")
-)
+var errFailed = errors.New("fix the errors above and rerun")
 
 type stackEnv struct {
 	layout  stack.Layout
 	dataDir string
 	repoURL string
 	git     source.Git
-	now     func() time.Time
 	animate bool
 	home    string
 	choose  func(ctx context.Context, choices []ui.Choice) ([]string, error)
-	found   func(harness string) bool
+	found   func(h stack.Harness) bool
 }
 
 func (e stackEnv) tilde(s string) string {
@@ -58,6 +53,9 @@ func (e stackEnv) step(cmd *cobra.Command, do func(ctx context.Context) (string,
 		detail, err := do(ctx)
 		return e.tilde(detail), err
 	}})
+	if err := ui.Interrupted(cmd.Context()); err != nil {
+		return err
+	}
 	return res[0].Err
 }
 
@@ -67,8 +65,11 @@ func (e stackEnv) repo() source.Repo {
 	return source.Repo{Dir: filepath.Join(e.dataDir, "stack"), URL: e.repoURL, Git: e.git}
 }
 
-func (e stackEnv) sync(w io.Writer, st source.State, mode stack.Mode) error {
-	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Now: e.now, Selected: st.Harnesses}.Run(mode)
+func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode stack.Mode) error {
+	if err := ui.Interrupted(ctx); err != nil {
+		return err
+	}
+	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Selected: st.Harnesses, Owned: st.Agents}.Run(mode)
 	view := render.StackSummary
 	if mode == stack.Status {
 		view = render.StackStatus
@@ -76,11 +77,20 @@ func (e stackEnv) sync(w io.Writer, st source.State, mode stack.Mode) error {
 	if werr := e.print(w, view(r.Rows)); werr != nil {
 		return fmt.Errorf("%w: %w", errOutput, werr)
 	}
-	if err != nil {
-		return fmt.Errorf("%w: %w", errStack, err)
+	if errors.Is(err, stack.ErrUnknownHarness) {
+		err = fmt.Errorf("%s: %w", e.statePath(), err)
 	}
-	if r.Conflicts() > 0 {
-		return errConflicts
+	if err != nil {
+		return failed(err)
+	}
+	if mode == stack.Link {
+		st.Agents = r.Agents
+		if err := source.SaveState(e.statePath(), st); err != nil {
+			return failed(err)
+		}
+	}
+	if r.Failures() > 0 {
+		return errFailed
 	}
 	return nil
 }
@@ -88,7 +98,7 @@ func (e stackEnv) sync(w io.Writer, st source.State, mode stack.Mode) error {
 func (e stackEnv) loadState() (source.State, error) {
 	st, err := source.LoadState(e.statePath())
 	if err != nil {
-		return st, fmt.Errorf("%w: %w", errStack, err)
+		return st, failed(err)
 	}
 	return st, nil
 }
@@ -117,8 +127,8 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 			"Clones sifatul-stack into the data dir (or uses --from), links skills and global instructions, and renders the named sub-agents. " +
 			"In a terminal, setup asks which harnesses to install into; --harness skips the question, and without either it keeps the last choice (all on a first setup). " +
 			"A harness you drop is cleaned up the same way `sifatul-stack remove` would. " +
-			"An existing global instructions file is backed up first; `sifatul-stack remove` restores it. " +
-			"Anything at a target path that sifatul-stack doesn't own is reported as a conflict and left alone.",
+			"Whatever already sits at a target path (a skill link, a global instructions file, a sub-agent file) is replaced without a backup. " +
+			"state.json records the sub-agents it rendered, so a later update or remove knows which agent files are its own.",
 		Example: "  sifatul-stack setup\n  sifatul-stack setup --harness claude,codex\n  sifatul-stack setup --from ~/projects/sifatul-stack",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -131,19 +141,22 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 			e.note(w, ui.OK.Render("✓"), "installing into "+labels(chosen))
 			want, err := e.resolveSource(cmd, from)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errStack, err)
+				return failed(err)
 			}
 			want.Harnesses = chosen
+			if prevErr == nil {
+				want.Agents = prev.Agents
+			}
 			if prevErr == nil && prev.Source != want.Source {
 				e.note(w, ui.Warn.Render("•"), "switching from "+prev.Source)
-				if err := e.sync(w, prev, stack.Unlink); err != nil {
+				if err := e.sync(cmd.Context(), w, prev, stack.Detach); err != nil {
 					return err
 				}
 			}
 			if err := source.SaveState(e.statePath(), want); err != nil {
-				return fmt.Errorf("%w: %w", errStack, err)
+				return failed(err)
 			}
-			return e.sync(w, want, stack.Link)
+			return e.sync(cmd.Context(), w, want, stack.Link)
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "use this checkout of sifatul-stack instead of a managed clone (edits show up live)")
@@ -160,9 +173,9 @@ func labels(harnesses []string) string {
 }
 
 func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source.State, hasPrev bool) ([]string, error) {
-	last := stack.Harnesses
-	if hasPrev && len(prev.Harnesses) > 0 {
-		last = prev.Harnesses
+	last := stack.Chosen(nil)
+	if hasPrev {
+		last = stack.Chosen(prev.Harnesses)
 	}
 	switch {
 	case cmd.Flags().Changed("harness"):
@@ -170,8 +183,9 @@ func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source
 	case e.choose == nil:
 		return last, nil
 	}
-	choices := make([]ui.Choice, len(stack.Harnesses))
-	for i, h := range stack.Harnesses {
+	harnesses := stack.All()
+	choices := make([]ui.Choice, len(harnesses))
+	for i, h := range harnesses {
 		found := e.found != nil && e.found(h)
 		hint := "not found"
 		if found {
@@ -179,19 +193,19 @@ func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source
 		}
 		on := found
 		if hasPrev {
-			on = slices.Contains(last, h)
+			on = slices.Contains(last, h.Key)
 		}
 		choices[i] = ui.Choice{
-			Key: h, Label: stack.HarnessLabel(h), Detail: e.tilde(e.layout.Dir(h)), Hint: hint,
-			On: on, Was: hasPrev && slices.Contains(last, h),
+			Key: h.Key, Label: h.Label, Detail: e.tilde(h.Dir(e.layout)), Hint: hint,
+			On: on, Was: hasPrev && slices.Contains(last, h.Key),
 		}
 	}
 	chosen, err := e.choose(cmd.Context(), choices)
 	if errors.Is(err, ui.ErrCanceled) {
-		return nil, fmt.Errorf("%w: setup canceled; nothing changed", errStack)
+		return nil, failed(errors.New("setup canceled; nothing changed"))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errStack, err)
+		return nil, failed(err)
 	}
 	return stack.ParseHarnesses(chosen)
 }
@@ -251,12 +265,12 @@ func newUpdateCmd(e stackEnv) *cobra.Command {
 					}
 				})
 				if err != nil {
-					return fmt.Errorf("%w: %w", errStack, err)
+					return failed(err)
 				}
 			} else {
 				e.note(w, ui.Warn.Render("•"), st.Source+" is your checkout; pull it yourself")
 			}
-			return e.sync(w, st, stack.Link)
+			return e.sync(cmd.Context(), w, st, stack.Link)
 		},
 	}
 }
@@ -264,7 +278,7 @@ func newUpdateCmd(e stackEnv) *cobra.Command {
 func newStatusCmd(e stackEnv) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show what is linked, rendered, stale, or in conflict (read-only)",
+		Short: "Show what is linked, rendered, stale, or failed (read-only)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w := cmd.OutOrStdout()
@@ -274,21 +288,18 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 				return nil
 			}
 			if err != nil {
-				return fmt.Errorf("%w: %w", errStack, err)
+				return failed(err)
 			}
 			kind := "your checkout"
 			if st.Managed {
 				kind = "managed clone"
 			}
-			chosen := st.Harnesses
-			if len(chosen) == 0 {
-				chosen = stack.Harnesses
-			}
+			chosen := stack.Chosen(st.Harnesses)
 			e.print(w, ui.Columns([][]string{
 				{ui.Accent.Render(brand), kind + ui.Muted.Render(" · "+st.Source)},
 				{ui.Accent.Render("Harnesses"), labels(chosen)},
 			}, "  ")+"\n")
-			return e.sync(w, st, stack.Status)
+			return e.sync(cmd.Context(), w, st, stack.Status)
 		},
 	}
 }
@@ -296,7 +307,7 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 func newRemoveCmd(e stackEnv) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove",
-		Short: "Remove everything setup created and restore backed-up global instructions",
+		Short: "Remove the links and sub-agent files setup created; nothing is restored",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w := cmd.OutOrStdout()
@@ -304,11 +315,11 @@ func newRemoveCmd(e stackEnv) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := e.sync(w, st, stack.Unlink); err != nil {
+			if err := e.sync(cmd.Context(), w, st, stack.Unlink); err != nil {
 				return err
 			}
 			if err := os.Remove(e.statePath()); err != nil {
-				return fmt.Errorf("%w: %w", errStack, err)
+				return failed(err)
 			}
 			if st.Managed {
 				e.note(w, ui.OK.Render("✓"), "removed; the clone at "+st.Source+" stays for the next setup")

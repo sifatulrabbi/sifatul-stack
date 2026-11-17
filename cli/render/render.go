@@ -100,6 +100,7 @@ func (v TextView) Text(w io.Writer, reports []usage.Report, now time.Time) error
 	}
 	var b strings.Builder
 	for i, r := range reports {
+		r = safeReport(r)
 		if i > 0 {
 			b.WriteString("\n")
 		}
@@ -127,6 +128,28 @@ func (v TextView) Text(w io.Writer, reports []usage.Report, now time.Time) error
 		}
 	}
 	return ui.Print(w, b.String())
+}
+
+func safeReport(r usage.Report) usage.Report {
+	r.Provider, r.Plan, r.Source, r.Error = ui.Safe(r.Provider), ui.Safe(r.Plan), ui.Safe(r.Source), ui.Safe(r.Error)
+	r.Windows = slices.Clone(r.Windows)
+	for i, w := range r.Windows {
+		w.Name = ui.Safe(w.Name)
+		if w.Budget != nil {
+			b := *w.Budget
+			b.Currency = ui.Safe(b.Currency)
+			w.Budget = &b
+		}
+		r.Windows[i] = w
+	}
+	if r.Extras != nil {
+		extras := make(map[string]string, len(r.Extras))
+		for k, v := range r.Extras {
+			extras[ui.Safe(k)] = ui.Safe(v)
+		}
+		r.Extras = extras
+	}
+	return r
 }
 
 func header(r usage.Report, now time.Time) string {

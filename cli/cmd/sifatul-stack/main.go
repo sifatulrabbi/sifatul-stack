@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,11 +23,48 @@ import (
 )
 
 func main() {
-	err := newRootCmd(defaultApp()).ExecuteContext(context.Background())
-	if err != nil && !errors.Is(err, errProviderFailed) {
-		ui.Print(os.Stderr, ui.Bad.Render("✗ error:")+" "+err.Error()+"\n")
+	ctx, stop := interruptible(context.Background(), os.Exit)
+	err := newRootCmd(defaultApp()).ExecuteContext(ctx)
+	if ui.Interrupted(ctx) != nil {
+		err = ui.ErrInterrupted
 	}
-	os.Exit(exitCode(err))
+	stop()
+	os.Exit(finish(os.Stderr, err))
+}
+
+func interruptible(parent context.Context, exit func(int)) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(parent)
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-signals:
+		case <-done:
+			return
+		}
+		cancel(ui.ErrInterrupted)
+		select {
+		case <-signals:
+			exit(interruptedCode)
+		case <-done:
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(signals)
+		close(done)
+		cancel(nil)
+	}
+}
+
+func finish(w io.Writer, err error) int {
+	if errors.Is(err, ui.ErrInterrupted) {
+		return interruptedCode
+	}
+	if err != nil && !errors.Is(err, errProviderFailed) {
+		ui.Print(w, ui.Bad.Render("✗ error:")+" "+ui.Safe(err.Error())+"\n")
+	}
+	return exitCode(err)
 }
 
 func defaultApp() app {
@@ -55,7 +94,6 @@ func defaultApp() app {
 			dataDir: filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(home, ".local", "share")), "sifatul-stack"),
 			repoURL: envOr("SIFATUL_STACK_REPO", source.DefaultURL),
 			git:     source.ExecGit,
-			now:     time.Now,
 			animate: animate,
 			home:    home,
 			choose:  choose,
@@ -83,14 +121,12 @@ func defaultProviders(home, codexDir string) []usage.Provider {
 	}
 }
 
-var harnessBinaries = map[string]string{"claude": "claude", "codex": "codex", "opencode": "opencode"}
-
-func harnessFound(layout stack.Layout, lookPath func(string) (string, error)) func(string) bool {
-	return func(harness string) bool {
-		if _, err := os.Stat(layout.Dir(harness)); err == nil {
+func harnessFound(layout stack.Layout, lookPath func(string) (string, error)) func(stack.Harness) bool {
+	return func(h stack.Harness) bool {
+		if _, err := os.Stat(h.Dir(layout)); err == nil {
 			return true
 		}
-		_, err := lookPath(harnessBinaries[harness])
+		_, err := lookPath(h.Binary)
 		return err == nil
 	}
 }

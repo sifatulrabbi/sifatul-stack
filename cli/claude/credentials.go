@@ -40,9 +40,13 @@ func ParseCredentials(raw []byte) (Credentials, error) {
 	if f.ClaudeAiOauth == nil || f.ClaudeAiOauth.AccessToken == "" {
 		return Credentials{}, ErrNotLoggedIn
 	}
+	var expires time.Time
+	if f.ClaudeAiOauth.ExpiresAt > 0 {
+		expires = time.UnixMilli(f.ClaudeAiOauth.ExpiresAt)
+	}
 	return Credentials{
 		AccessToken: f.ClaudeAiOauth.AccessToken,
-		ExpiresAt:   time.UnixMilli(f.ClaudeAiOauth.ExpiresAt),
+		ExpiresAt:   expires,
 		Plan:        f.ClaudeAiOauth.SubscriptionType,
 		Tier:        f.ClaudeAiOauth.RateLimitTier,
 	}, nil

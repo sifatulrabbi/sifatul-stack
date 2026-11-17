@@ -13,7 +13,22 @@ func rolloutTestLine(timestamp, limits string) string {
 	return `{"timestamp":"` + timestamp + `","type":"event_msg","payload":{"type":"token_count","rate_limits":` + limits + `}}` + "\n"
 }
 
-func TestRolloutUsesNewestFile(t *testing.T) {
+func TestRolloutUsesTheMostRecentlyModifiedFile(t *testing.T) {
+	source := RolloutSource{FS: fstest.MapFS{
+		"2026/11/15/rollout-z.jsonl": {Data: []byte(rolloutTestLine("2026-11-17T10:00:00Z", `{"limit_id":"resumed"}`)), ModTime: fixedNow},
+		"2026/11/16/rollout-a.jsonl": {Data: []byte(rolloutTestLine("2026-11-16T00:00:00Z", `{"limit_id":"earlier"}`)), ModTime: fixedNow.Add(-2 * time.Hour)},
+		"2026/11/17/rollout-a.jsonl": {Data: []byte(rolloutTestLine("2026-11-17T08:00:00Z", `{"limit_id":"newer-name"}`)), ModTime: fixedNow.Add(-time.Hour)},
+	}}
+	reading, err := source.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reading.Snapshots) != 1 || reading.Snapshots[0].LimitID != "resumed" {
+		t.Fatalf("unexpected reading: %+v", reading)
+	}
+}
+
+func TestRolloutBreaksModTimeTiesByNewestName(t *testing.T) {
 	source := RolloutSource{FS: fstest.MapFS{
 		"2026/11/15/rollout-z.jsonl": {Data: []byte(rolloutTestLine("2026-11-17T00:00:00Z", `{"limit_id":"older"}`))},
 		"2026/11/16/rollout-a.jsonl": {Data: []byte(rolloutTestLine("2026-11-16T00:00:00Z", `{"limit_id":"earlier-name"}`))},

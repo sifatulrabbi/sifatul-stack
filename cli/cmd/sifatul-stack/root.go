@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sifatulrabbi/sifatul-stack/cli/codex"
 	"github.com/sifatulrabbi/sifatul-stack/cli/render"
 	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
@@ -20,12 +21,26 @@ var (
 	errOutput         = errors.New("write output")
 )
 
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e exitError) Error() string { return e.err.Error() }
+func (e exitError) Unwrap() error { return e.err }
+
+const interruptedCode = 130
+
+func failed(err error) error { return exitError{code: 1, err: err} }
+
 func exitCode(err error) int {
+	var exit exitError
 	switch {
 	case err == nil:
 		return 0
-	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput),
-		errors.Is(err, errStack), errors.Is(err, errConflicts):
+	case errors.As(err, &exit):
+		return exit.code
+	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput), errors.Is(err, errFailed):
 		return 1
 	default:
 		return 2
@@ -77,13 +92,16 @@ func newUsageCmd(a app) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			selected := selectProviders(a.providers, args)
-			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+			ctx, cancel := usage.WithLiveTimeout(cmd.Context(), timeout)
 			defer cancel()
 			var reports []usage.Report
 			if asJSON {
 				reports = usage.Collect(ctx, selected)
 			} else {
 				reports = a.fetchWithProgress(ctx, cmd.OutOrStdout(), selected)
+			}
+			if err := ui.Interrupted(cmd.Context()); err != nil {
+				return err
 			}
 
 			write := a.text.Text
@@ -104,7 +122,7 @@ func newUsageCmd(a app) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print compact one-line JSON for agents (rounded percents, precomputed resets_in_s)")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "with --json: print the full, indented report (for debugging)")
-	cmd.Flags().DurationVar(&timeout, "timeout", 15*time.Second, "overall timeout")
+	cmd.Flags().DurationVar(&timeout, "timeout", 15*time.Second, fmt.Sprintf("timeout for live sources; the Codex rollout fallback gets %s more", codex.FallbackBudget))
 	return cmd
 }
 

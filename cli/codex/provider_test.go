@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -82,5 +83,42 @@ func TestToReportNamesWindowsByDurationNotSlot(t *testing.T) {
 	}
 	if r.Plan != "pro" || r.Extras["credits"] != "unlimited" {
 		t.Fatalf("report = %+v", r)
+	}
+}
+
+type hangingSource struct{}
+
+func (hangingSource) Read(ctx context.Context) (Reading, error) {
+	<-ctx.Done()
+	return Reading{}, ctx.Err()
+}
+
+func cachedRollout() RolloutSource {
+	return RolloutSource{FS: fstest.MapFS{
+		"2026/11/16/rollout-a.jsonl": {Data: []byte(rolloutTestLine("2026-11-16T09:00:00Z", `{"limit_id":"codex","primary":{"used_percent":10,"window_minutes":10080}}`))},
+	}}
+}
+
+func TestProviderFallsBackWhenLiveHangsPastTheDeadline(t *testing.T) {
+	p := Provider{Live: hangingSource{}, Fallback: cachedRollout()}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	r, err := p.Usage(ctx)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !r.Stale || r.Source != "rollout-cache" {
+		t.Fatalf("report = %+v", r)
+	}
+}
+
+func TestProviderSkipsTheFallbackWhenCanceled(t *testing.T) {
+	p := Provider{Live: hangingSource{}, Fallback: cachedRollout()}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+
+	if _, err := p.Usage(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

@@ -1,9 +1,13 @@
 package ui
 
 import (
+	"context"
+	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -109,5 +113,18 @@ func TestChooserViewMarksRemovalsAndClearsWhenDone(t *testing.T) {
 	m, _ = press(m, "enter")
 	if m.View().Content != "" {
 		t.Error("view should clear once confirmed")
+	}
+}
+
+func TestChooseMapsCancelToErrCanceled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	got, err := Choose(ctx, strings.NewReader("q"), io.Discard, "pick", harnessChoices())
+	if !errors.Is(err, ErrCanceled) || got != nil {
+		t.Errorf("q: %v, %v", got, err)
+	}
+	got, err = Choose(ctx, strings.NewReader("\r"), io.Discard, "pick", harnessChoices())
+	if err != nil || strings.Join(got, ",") != "claude,codex" {
+		t.Errorf("enter: %v, %v", got, err)
 	}
 }

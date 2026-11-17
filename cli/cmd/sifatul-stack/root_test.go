@@ -5,10 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/sifatulrabbi/sifatul-stack/cli/codex"
+	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
@@ -122,5 +127,122 @@ func TestPrettyWithoutJSONExitsTwo(t *testing.T) {
 	_, err := execute(t, []usage.Provider{fakeProvider{name: "codex"}}, "--pretty")
 	if exitCode(err) != 2 || !strings.Contains(err.Error(), "--pretty requires --json") {
 		t.Fatalf("exit = %d, err = %v", exitCode(err), err)
+	}
+}
+
+func TestFinishStripsTerminalEscapesFromErrors(t *testing.T) {
+	t.Setenv("TTY_FORCE", "1")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("COLORTERM", "truecolor")
+	var buf bytes.Buffer
+	code := finish(&buf, errors.New("git pull: remote: \x1b]52;c;ZWNobyBwd25lZA==\x07hi"))
+	if code != 2 || strings.Contains(buf.String(), "\x1b]") || strings.Contains(buf.String(), "\x07") || !strings.Contains(buf.String(), "remote: hi") {
+		t.Fatalf("code = %d, out = %q", code, buf.String())
+	}
+}
+
+func TestFinishStaysQuietWhenAProviderFailed(t *testing.T) {
+	var buf bytes.Buffer
+	if code := finish(&buf, errProviderFailed); code != 1 || buf.Len() != 0 {
+		t.Fatalf("code = %d, out = %q", code, buf.String())
+	}
+}
+
+type blockingProvider struct{ started chan struct{} }
+
+func (blockingProvider) Name() string { return "claude" }
+
+func (b blockingProvider) Usage(ctx context.Context) (usage.Report, error) {
+	close(b.started)
+	<-ctx.Done()
+	return usage.Report{}, ctx.Err()
+}
+
+func TestInterruptedUsagePrintsNothingAndExits130(t *testing.T) {
+	for _, args := range [][]string{nil, {"--json"}} {
+		p := blockingProvider{started: make(chan struct{})}
+		ctx, interrupt := context.WithCancelCause(context.Background())
+		go func() {
+			<-p.started
+			interrupt(ui.ErrInterrupted)
+		}()
+		cmd := newUsageCmd(app{providers: []usage.Provider{p}, now: fixedNow})
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(args)
+		code := finish(&out, cmd.ExecuteContext(ctx))
+		if code != 130 || out.Len() != 0 {
+			t.Fatalf("%v: code = %d, out = %q", args, code, out.String())
+		}
+	}
+}
+
+func TestFirstInterruptCancelsAndSecondExits130(t *testing.T) {
+	exited := make(chan int, 1)
+	ctx, stop := interruptible(context.Background(), func(code int) { exited <- code })
+	defer stop()
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("first SIGINT did not cancel")
+	}
+	if !errors.Is(ui.Interrupted(ctx), ui.ErrInterrupted) {
+		t.Fatalf("cause = %v", context.Cause(ctx))
+	}
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-exited:
+		if code != 130 {
+			t.Fatalf("exit code = %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second SIGINT did not exit")
+	}
+}
+
+func TestFinishTreatsAnInterruptAsQuiet130(t *testing.T) {
+	var buf bytes.Buffer
+	if code := finish(&buf, failed(fmt.Errorf("git clone: %w", ui.ErrInterrupted))); code != 130 || buf.Len() != 0 {
+		t.Fatalf("code = %d, out = %q", code, buf.String())
+	}
+}
+
+type hangingSnapshots struct{ entered chan struct{} }
+
+func (h hangingSnapshots) Read(ctx context.Context) (codex.Reading, error) {
+	if h.entered != nil {
+		close(h.entered)
+	}
+	<-ctx.Done()
+	return codex.Reading{}, ctx.Err()
+}
+
+func TestInterruptDuringTheCodexFallbackStopsUsage(t *testing.T) {
+	for _, args := range [][]string{{"--json"}, nil} {
+		fallback := hangingSnapshots{entered: make(chan struct{})}
+		p := codex.Provider{Live: hangingSnapshots{}, Fallback: fallback}
+		ctx, interrupt := context.WithCancelCause(context.Background())
+		go func() {
+			<-fallback.entered
+			interrupt(ui.ErrInterrupted)
+		}()
+		cmd := newUsageCmd(app{providers: []usage.Provider{p}, now: fixedNow})
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(append(args, "--timeout", "50ms"))
+
+		start := time.Now()
+		code := finish(&out, cmd.ExecuteContext(ctx))
+
+		if took := time.Since(start); code != 130 || out.Len() != 0 || took > time.Second {
+			t.Fatalf("%v: code = %d after %s, out = %q", args, code, took, out.String())
+		}
 	}
 }

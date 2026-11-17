@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const DefaultURL = "https://github.com/sifatulrabbi/sifatul-stack"
@@ -18,11 +19,15 @@ var (
 	ErrNotSetUp = errors.New("sifatul-stack is not set up; run `sifatul-stack setup` first")
 )
 
+const gitGrace = 5 * time.Second
+
 type Git func(ctx context.Context, args ...string) ([]byte, error)
 
 func ExecGit(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = gitGrace
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -38,10 +43,7 @@ type Repo struct {
 
 func (r Repo) Ensure(ctx context.Context) (cloned bool, err error) {
 	if _, err := os.Stat(r.Dir); errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(filepath.Dir(r.Dir), 0o755); err != nil {
-			return false, err
-		}
-		if _, err := r.Git(ctx, "clone", "--quiet", r.URL, r.Dir); err != nil {
+		if err := r.clone(ctx); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -49,7 +51,25 @@ func (r Repo) Ensure(ctx context.Context) (cloned bool, err error) {
 	if _, err := r.git(ctx, "rev-parse", "--is-inside-work-tree"); err != nil {
 		return false, fmt.Errorf("%s exists but is not a git clone: %w", r.Dir, err)
 	}
+	if _, err := r.git(ctx, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
+		return false, fmt.Errorf("%s has nothing checked out, likely from an interrupted clone; delete %s and rerun setup", r.Dir, r.Dir)
+	}
 	return false, nil
+}
+
+func (r Repo) clone(ctx context.Context) error {
+	if err := os.MkdirAll(filepath.Dir(r.Dir), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(filepath.Dir(r.Dir), "."+filepath.Base(r.Dir)+".clone-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	if _, err := r.Git(ctx, "clone", "--quiet", r.URL, tmp); err != nil {
+		return err
+	}
+	return os.Rename(tmp, r.Dir)
 }
 
 type Change struct {
@@ -91,6 +111,7 @@ type State struct {
 	Source    string   `json:"source"`
 	Managed   bool     `json:"managed"`
 	Harnesses []string `json:"harnesses,omitempty"`
+	Agents    []string `json:"agents,omitempty"`
 }
 
 func LoadState(path string) (State, error) {
@@ -112,6 +133,11 @@ func LoadState(path string) (State, error) {
 }
 
 func SaveState(path string, s State) error {
+	if target, err := filepath.EvalSymlinks(path); err == nil {
+		path = target
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -119,5 +145,23 @@ func SaveState(path string, s State) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(raw, '\n'), 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	_, err = tmp.Write(append(raw, '\n'))
+	if err == nil {
+		err = tmp.Chmod(0o644)
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

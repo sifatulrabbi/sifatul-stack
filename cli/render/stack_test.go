@@ -9,8 +9,12 @@ import (
 	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 )
 
-func row(kind, name, harness, state, change string) stack.Row {
+func row(kind, name, harness string, state stack.State, change stack.Change) stack.Row {
 	return stack.Row{Kind: kind, Name: name, Harness: harness, State: state, Change: change}
+}
+
+func toggled(name string, enabled bool) stack.Row {
+	return stack.Row{Kind: "agent", Name: name, Harness: "opencode", State: stack.Current, Enabled: &enabled}
 }
 
 func freshSetup() []stack.Row {
@@ -19,13 +23,13 @@ func freshSetup() []stack.Row {
 		rows = append(rows, row("skill", sk, "claude", "linked", "linked"), row("skill", sk, "agents", "linked", "linked"))
 	}
 	rows = append(rows,
-		row("instructions", "AGENTS.md", "claude", "backed up to CLAUDE.md.backup-20261116120000", "backed up"),
-		row("instructions", "AGENTS.md", "claude", "linked", "linked"),
-		row("instructions", "AGENTS.md", "codex", "linked", ""),
+		row("instructions", "AGENTS.md", "claude", "linked", "replaced"),
+		row("instructions", "AGENTS.md", "codex", "linked", "linked"),
+		row("instructions", "AGENTS.md", "opencode", "linked", ""),
 		row("agent", "senior", "claude", "current", ""),
 		row("agent", "senior", "codex", "written", "re-rendered"),
-		row("agent", "senior", "opencode", "off, current", ""),
-		stack.Row{Kind: "skill", Name: "x", Harness: "claude", State: "conflict: /h/.claude/skills/x exists", Conflict: true},
+		toggled("senior", false),
+		stack.Row{Kind: "skill", Name: "x", Harness: "claude", State: stack.Failed, Detail: "symlink /h/.claude/skills/x: permission denied"},
 	)
 	return rows
 }
@@ -44,14 +48,14 @@ func TestStackSummaryGroupsChangesByKind(t *testing.T) {
 	for _, want := range []string{
 		"Skills        ✓ 8 linked into Claude Code, ~/.agents",
 		"+ new  a, b, c, d, e, f, and 2 more",
-		"Instructions  ✓ linked into Claude Code, Codex",
-		"+ new  Claude Code",
-		"• backed up  Claude Code (CLAUDE.md.backup-20261116120000)",
+		"Instructions  ✓ linked into Claude Code, Codex, OpenCode",
+		"+ new  Codex",
+		"~ replaced  Claude Code",
 		"Sub-agents    ✓ 1 rendered for Claude Code, Codex, OpenCode",
 		"~ re-rendered  senior (Codex)",
 		"○ 1 off in OpenCode",
-		"! 1 conflict, left alone",
-		"skill x · Claude Code  /h/.claude/skills/x exists",
+		"! 1 failed",
+		"skill x · Claude Code  symlink /h/.claude/skills/x: permission denied",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary lacks %q:\n%s", want, out)
@@ -65,10 +69,10 @@ func TestStackSummaryGroupsChangesByKind(t *testing.T) {
 func TestStackSummaryOfARemoval(t *testing.T) {
 	out := plainSummary(t, []stack.Row{
 		row("skill", "a", "claude", "removed", "removed"),
-		row("instructions", "AGENTS.md", "claude", "restored CLAUDE.md.backup-1", "restored"),
+		row("instructions", "AGENTS.md", "claude", "removed", "removed"),
 		row("instructions", "AGENTS.md", "codex", "removed", "removed"),
 	})
-	if strings.Contains(out, "✓") || !strings.Contains(out, "− removed  a") || !strings.Contains(out, "• restored  Claude Code (CLAUDE.md.backup-1)") || !strings.Contains(out, "− removed  Codex") {
+	if strings.Contains(out, "✓") || !strings.Contains(out, "− removed  a") || !strings.Contains(out, "− removed  Claude Code, Codex") {
 		t.Errorf("summary:\n%s", out)
 	}
 }
@@ -80,8 +84,8 @@ func TestStackStatusIsAMatrixWithAFixHint(t *testing.T) {
 		row("skill", "tdd", "agents", "missing", ""),
 		row("skill", "old", "claude", "dangling", ""),
 		row("agent", "senior", "claude", "stale", ""),
-		row("agent", "senior", "opencode", "on, current", ""),
-		row("agent", "junior", "opencode", "off, current", ""),
+		toggled("senior", true),
+		toggled("junior", false),
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -107,5 +111,105 @@ func TestStackStatusWithEverythingInPlaceHasNoHint(t *testing.T) {
 	ui.Print(&buf, StackStatus([]stack.Row{row("skill", "tdd", "claude", "linked", "")}))
 	if strings.Contains(buf.String(), "sifatul-stack update") {
 		t.Errorf("status:\n%s", buf.String())
+	}
+}
+
+func TestStackOutputStripsEscapesFromRepoNames(t *testing.T) {
+	evil := "x" + "\x1b]52;c;ZWNobyBwd25lZA==\x07"
+	rows := []stack.Row{
+		row("skill", evil, "claude", stack.Linked, stack.DidLink),
+		row("skill", evil+"2", "claude", stack.Missing, ""),
+		{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.Stale, Detail: "/h/CLAUDE.md\x07"},
+		{Kind: "skill", Name: evil, Harness: "agents", State: stack.Failed, Detail: "/h/" + evil},
+	}
+	for name, out := range map[string]string{"summary": StackSummary(rows), "status": StackStatus(rows)} {
+		for _, bad := range []string{"\x1b]", "\x07"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("%s carries %q:\n%q", name, bad, out)
+			}
+		}
+	}
+}
+
+func plainStatus(t *testing.T, rows []stack.Row) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := ui.Print(&buf, StackStatus(rows)); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func TestStackStatusFlagsFailuresWithoutAnUpdateHint(t *testing.T) {
+	out := plainStatus(t, []stack.Row{
+		{Kind: "skill", Name: "x", Harness: "claude", State: stack.Failed, Detail: "lstat /h/.claude/skills/x: permission denied"},
+		row("skill", "y", "claude", stack.Linked, ""),
+	})
+	for _, want := range []string{"! failed", "! 1 failed", "lstat /h/.claude/skills/x: permission denied"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "✓ failed") || strings.Contains(out, "sifatul-stack update") {
+		t.Errorf("status:\n%s", out)
+	}
+}
+
+func TestStackStatusAsksForUpdateOnOrphansAndPathsToReplace(t *testing.T) {
+	for _, r := range []stack.Row{
+		row("agent", "gone", "claude", stack.Orphaned, ""),
+		{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.Stale, Detail: "/h/.claude/CLAUDE.md"},
+	} {
+		out := plainStatus(t, []stack.Row{r})
+		if strings.Contains(out, "✓") || !strings.Contains(out, "sifatul-stack update") {
+			t.Errorf("%s:\n%s", r.State, out)
+		}
+	}
+}
+
+func TestStackStatusOffAgentNeedsNoUpdate(t *testing.T) {
+	if out := plainStatus(t, []stack.Row{toggled("junior", false)}); strings.Contains(out, "sifatul-stack update") || !strings.Contains(out, "○ off") {
+		t.Errorf("status:\n%s", out)
+	}
+}
+
+func TestStackSummaryListsWrittenPrunedAndPluralFailures(t *testing.T) {
+	out := plainSummary(t, []stack.Row{
+		row("skill", "a", "claude", stack.Linked, stack.DidLink),
+		row("skill", "a", "agents", stack.Linked, ""),
+		row("skill", "old", "claude", stack.Pruned, stack.DidPrune),
+		row("agent", "senior", "codex", stack.Written, stack.DidWrite),
+		{Kind: "skill", Name: "x", Harness: "claude", State: stack.Failed, Detail: "one"},
+		{Kind: "skill", Name: "z", Harness: "claude", State: stack.Failed, Detail: "two"},
+	})
+	for _, want := range []string{
+		"+ new  a (Claude Code)",
+		"− pruned  old",
+		"✓ 1 linked into Claude Code, ~/.agents",
+		"✓ 1 rendered for Codex",
+		"+ new  senior",
+		"! 2 failed",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestOffAgentsAreCountedPerHarness(t *testing.T) {
+	off := false
+	out := plainSummary(t, []stack.Row{
+		toggled("senior", false),
+		toggled("junior", false),
+		toggled("associate", true),
+		{Kind: "agent", Name: "senior", Harness: "claude", State: stack.Current, Enabled: &off},
+	})
+	for _, want := range []string{
+		"○ 2 off in OpenCode; delete `disabled: true` from one to switch it on\n",
+		"○ 1 off in Claude Code\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary lacks %q:\n%s", want, out)
+		}
 	}
 }
