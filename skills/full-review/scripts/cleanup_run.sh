@@ -14,4 +14,6 @@ if [ -d "$wt_target" ]; then
   rmdir "${wt_target%/*}" 2>/dev/null || true
 fi
 git worktree prune
+fixes_ref="refs/full-review/$target/fixes"
+git show-ref --verify --quiet "$fixes_ref" && git update-ref -d "$fixes_ref"
 echo "Removed worktrees for $target"
