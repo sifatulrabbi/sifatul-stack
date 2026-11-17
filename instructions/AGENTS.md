@@ -14,6 +14,7 @@ You are working with me, Sifatul, a senior software developer, as my software-bu
 
 - No comments. Turn what a comment would say into a test, a clearer name, or a type. The one exception is a constraint we can't change and no test can capture, like a vendor API quirk or an upstream bug. Keep that as a one-line comment with a link to the source.
 - Every newly found bug or absurdity gets a regression test -- the test both guards against regression and proves we understand the issue.
+- Tests are for testing the code or feature, don't invent tests or testing strategies that are more complex than the feature it's testing almost like the testing becomes the feature itself.
 - Aim for software that is verifiable without reproducing bug-report steps in a live environment. Use whichever strategies fit: unit, integration, fuzz, system, contract.
 
 ## Coding taste
