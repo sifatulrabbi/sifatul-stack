@@ -7,7 +7,7 @@ One harness-neutral stack of skills, named sub-agents, and global instructions, 
 - `skills/<name>/`: Agent Skills standard (`SKILL.md` with `name` matching the directory, plus `description`). Linked into `~/.claude/skills` (Claude Code) and `~/.agents/skills` (Codex and OpenCode both read it).
 - `agents/<agent>.md` + `agents/models.tsv`: one description and prompt per agent (`principal`, `senior`, `junior`, `associate`); the TSV maps agent × harness to model and effort, and its rows define which agents exist. The CLI renders each harness's format from these; never edit the rendered files.
 - `instructions/AGENTS.md`: the user's global instructions, linked to `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.config/opencode/AGENTS.md`.
-- `cli/`: the Go CLI with its own `AGENTS.md`. `stack/` links and renders, `source/` manages the clone and `state.json`, the rest is `usage`.
+- `cli/`: the Go CLI with its own `AGENTS.md`. `stack/` links and renders, `source/` manages the clone and `state.json` (source, chosen harnesses, rendered agents), the rest is `usage`.
 
 ## How installs work
 
@@ -20,7 +20,7 @@ One harness-neutral stack of skills, named sub-agents, and global instructions, 
 
 - Keep skills and agent prompts harness-neutral: name the agents (`principal`, `senior`, `junior`, `associate`), never models; reference a skill's own files through its directory, not harness-specific agent definitions.
 - Agent descriptions are written into YAML and TOML double-quoted strings, so they must not contain `"` or `\`; prompt bodies must not contain `'''`. The CLI refuses to render otherwise.
-- The CLI only touches what it owns: symlinks into the stack source and files carrying `# managed by sifatul-stack`. Anything else at a target path is reported as a conflict and left alone. Owned links whose skill left the source, and managed agent files whose agent left `models.tsv`, are pruned on `setup` and `update`.
+- The CLI owns symlinks into the stack source and the agent files named by the tiers that `state.json` records under `agents` (written after every `setup` and `update`). Rendered files carry no ownership marker. `setup` and `update` replace whatever sits at a target path (file, dir, or foreign symlink) without a backup; `remove` deletes only what the CLI owns and restores nothing. Owned links whose skill left the source, and owned agent files whose tier left `models.tsv`, are pruned on `setup` and `update`; files with other names in an agents dir are never touched.
 - OpenCode agents install with `disabled: true`; the user switches one on by removing that line, and re-rendering keeps their choice. `opencode.json` cannot re-enable a disabled Markdown agent (checked on OpenCode 2.3).
 
 ## Verify
