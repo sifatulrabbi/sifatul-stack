@@ -415,10 +415,10 @@ func (r *run) syncAgent(d agentDef, h Harness) {
 		r.conflict("agent", d.Tier, h.Key, dst+" is not managed by sifatul-stack")
 		return
 	}
-	enabled := !h.toggles || (present && !slices.Contains(strings.Split(text, "\n"), "disabled: true"))
+	enabled := h.enabledIn == nil || (present && h.enabledIn(text))
 	wanted := h.render(d, d.Models[h.Key], enabled)
 	row := Row{Kind: "agent", Name: d.Tier, Harness: h.Key, State: Stale}
-	if h.toggles {
+	if h.enabledIn != nil {
 		row.Enabled = &enabled
 	}
 	switch {

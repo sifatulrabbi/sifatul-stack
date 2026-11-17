@@ -158,3 +158,7 @@ func renderOpenCode(d agentDef, m model, enabled bool) string {
 	fmt.Fprintf(&b, "---\n%s", d.Prompt)
 	return finish(&b)
 }
+
+func openCodeEnabled(raw string) bool {
+	return !slices.Contains(strings.Split(raw, "\n"), "disabled: true")
+}

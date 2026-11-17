@@ -195,3 +195,21 @@ func TestStackSummaryListsWrittenPrunedAndPluralConflicts(t *testing.T) {
 		}
 	}
 }
+
+func TestOffAgentsAreCountedPerHarness(t *testing.T) {
+	off := false
+	out := plainSummary(t, []stack.Row{
+		toggled("senior", false),
+		toggled("junior", false),
+		toggled("associate", true),
+		{Kind: "agent", Name: "senior", Harness: "claude", State: stack.Current, Enabled: &off},
+	})
+	for _, want := range []string{
+		"○ 2 off in OpenCode; delete `disabled: true` from one to switch it on\n",
+		"○ 1 off in Claude Code\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary lacks %q:\n%s", want, out)
+		}
+	}
+}

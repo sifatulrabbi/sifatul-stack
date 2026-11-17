@@ -12,12 +12,13 @@ type Harness struct {
 	Key          string
 	Label        string
 	Binary       string
+	SwitchOn     string
 	dir          func(Layout) string
 	instructions string
 	agentExt     string
 	skills       skillsGroup
-	toggles      bool
 	render       func(d agentDef, m model, enabled bool) string
+	enabledIn    func(raw string) bool
 	renderedName func(raw string) (string, bool)
 }
 
@@ -35,7 +36,7 @@ var (
 var table = []Harness{
 	{Key: "claude", Label: "Claude Code", Binary: "claude", dir: func(l Layout) string { return l.Claude }, instructions: "CLAUDE.md", agentExt: ".md", skills: claudeSkills, render: renderClaude, renderedName: claudeName},
 	{Key: "codex", Label: "Codex", Binary: "codex", dir: func(l Layout) string { return l.Codex }, instructions: "AGENTS.md", agentExt: ".toml", skills: sharedSkills, render: renderCodex, renderedName: codexName},
-	{Key: "opencode", Label: "OpenCode", Binary: "opencode", dir: func(l Layout) string { return l.OpenCode }, instructions: "AGENTS.md", agentExt: ".md", skills: sharedSkills, toggles: true, render: renderOpenCode},
+	{Key: "opencode", Label: "OpenCode", Binary: "opencode", dir: func(l Layout) string { return l.OpenCode }, instructions: "AGENTS.md", agentExt: ".md", skills: sharedSkills, render: renderOpenCode, enabledIn: openCodeEnabled, SwitchOn: "delete `disabled: true` from one to switch it on"},
 }
 
 var Harnesses = keys(table)
@@ -84,7 +85,7 @@ func HarnessLabel(key string) string {
 	if h, err := Find(key); err == nil {
 		return h.Label
 	}
-	for _, g := range []skillsGroup{claudeSkills, sharedSkills} {
+	for _, g := range skillsGroups() {
 		if g.key == key {
 			return g.label
 		}

@@ -67,8 +67,8 @@ func StackSummary(rows []stack.Row) string {
 		}
 		if k.kind == "agent" {
 			off := filterRows(ofKind, func(r stack.Row) bool { return r.Enabled != nil && !*r.Enabled })
-			if len(off) > 0 {
-				lines = append(lines, ui.Muted.Render(fmt.Sprintf("○ %d off in OpenCode; delete `disabled: true` from one to switch it on", len(off))))
+			for _, key := range unique(off, func(r stack.Row) string { return r.Harness }) {
+				lines = append(lines, ui.Muted.Render(offLine(key, len(filterRows(off, func(r stack.Row) bool { return r.Harness == key })))))
 			}
 		}
 		for i, l := range lines {
@@ -184,6 +184,14 @@ func changedItems(kind string, all, changed []stack.Row) string {
 		items = append(items[:listLimit], ui.Muted.Render(fmt.Sprintf("and %d more", len(items)-listLimit)))
 	}
 	return strings.Join(items, ", ")
+}
+
+func offLine(key string, n int) string {
+	line := fmt.Sprintf("○ %d off in %s", n, stack.HarnessLabel(key))
+	if h, err := stack.Find(key); err == nil && h.SwitchOn != "" {
+		line += "; " + h.SwitchOn
+	}
+	return line
 }
 
 func harnessOf(r stack.Row) string { return stack.HarnessLabel(r.Harness) }
