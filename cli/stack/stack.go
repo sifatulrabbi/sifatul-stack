@@ -93,11 +93,13 @@ func (r Report) Failures() int {
 }
 
 type Syncer struct {
-	Source   string
-	Layout   Layout
-	Selected []string
-	Dropped  []string
-	Owned    []string
+	Source    string
+	Layout    Layout
+	Selected  []string
+	Dropped   []string
+	Owned     []string
+	ExtrasDir string
+	Extras    []Extra
 }
 
 type run struct {
@@ -134,13 +136,13 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 		}
 	}
 	var defs []agentDef
-	var skills []string
+	var skills []skillLink
 	if !mode.releases() {
 		var err error
 		if defs, err = loadAgents(s.Source); err != nil {
 			return Report{}, err
 		}
-		if skills, err = s.skills(); err != nil {
+		if skills, err = s.skillLinks(); err != nil {
 			return Report{}, err
 		}
 	} else if mode == Unlink {
@@ -159,8 +161,15 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 		}
 		dir := g.dir(s.Layout)
 		if !x.mode.releases() {
-			for _, name := range skills {
-				x.linkPath("skill", name, g.key, filepath.Join(s.Source, "skills", name), filepath.Join(dir, name))
+			for _, l := range skills {
+				switch {
+				case l.err == nil:
+					x.linkPath("skill", l.name, g.key, l.src, filepath.Join(dir, l.name))
+				case x.mode == Status && errors.Is(l.err, errNotCloned):
+					x.row("skill", l.name, g.key, Missing)
+				default:
+					x.fail("skill", l.name, g.key, l.err)
+				}
 			}
 		}
 		x.pruneSkills(g.key, dir, skills)
@@ -287,19 +296,30 @@ func replaceWithLink(src, dst string) error {
 	return os.Symlink(src, dst)
 }
 
-func (r *run) pruneSkills(harness, dir string, current []string) {
+func (r *run) ownsSkillLink(target string) bool {
+	roots := []string{filepath.Join(r.Source, "skills")}
+	if r.ExtrasDir != "" {
+		roots = append(roots, r.ExtrasDir)
+	}
+	return slices.ContainsFunc(roots, func(root string) bool {
+		return strings.HasPrefix(target, root+string(filepath.Separator))
+	})
+}
+
+func (r *run) pruneSkills(harness, dir string, current []skillLink) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	owned := filepath.Join(r.Source, "skills") + string(filepath.Separator)
 	for _, e := range entries {
 		path := filepath.Join(dir, e.Name())
 		target, err := os.Readlink(path)
-		if err != nil || !strings.HasPrefix(target, owned) {
+		if err != nil || !r.ownsSkillLink(target) {
 			continue
 		}
-		if !r.mode.releases() && slices.Contains(current, e.Name()) && isLinkTo(path, filepath.Join(r.Source, "skills", e.Name())) {
+		if !r.mode.releases() && slices.ContainsFunc(current, func(l skillLink) bool {
+			return l.err == nil && l.name == e.Name() && isLinkTo(path, l.src)
+		}) {
 			continue
 		}
 		r.retire("skill", e.Name(), harness, path, Dangling)

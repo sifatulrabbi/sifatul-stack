@@ -6,14 +6,16 @@ One harness-neutral stack of skills, named sub-agents, and global instructions, 
 
 - `skills/<name>/`: Agent Skills standard (`SKILL.md` with `name` matching the directory, plus `description`). Linked into `~/.claude/skills` (Claude Code) and `~/.agents/skills` (Codex and OpenCode both read it).
 - `agents/<agent>.md` + `agents/models.tsv`: one description and prompt per agent (`principal`, `senior`, `junior`, `associate`); the TSV maps agent × harness to model and effort, and its rows define which agents exist. The CLI renders each harness's format from these; never edit the rendered files.
+- `extras.json`: other skill repos the user can add at install, keyed by name, each with `repo`, an optional `branch`, and the `skills` to link by folder name. Unknown keys are rejected.
 - `instructions/AGENTS.md`: the user's global instructions, linked to `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.config/opencode/AGENTS.md`.
-- `cli/`: the Go CLI with its own `AGENTS.md`. `stack/` links and renders, `source/` manages the clone and `state.json` (source, chosen harnesses, rendered agents), the rest is `usage`.
+- `cli/`: the Go CLI with its own `AGENTS.md`. `stack/` links and renders, `source/` manages the clone and `state.json` (source, chosen harnesses and extras, rendered agents), the rest is `usage`.
 
 ## How installs work
 
 - The binary carries only logic; the stack content is read at runtime. Every `install` clones this repo into `${XDG_DATA_HOME:-~/.local/share}/sifatul-stack/stack` if it is missing, otherwise runs `git pull --ff-only` there, then syncs and records it in `state.json` next to it. So content changes ship by pushing to `main`; only Go changes need a release.
 - `install --from <checkout>` links a working copy instead (dev mode) and never pulls it.
 - `state.json` also records the chosen harnesses (`install --harness`, or the picker in a terminal); no list means all three. `install` and `status` touch only the chosen harnesses; a harness never chosen is never touched. A harness dropped from the previous choice is cleaned up by that `install`: its owned links and agent files are removed and nothing is restored. `~/.agents/skills` belongs to Codex and OpenCode together, so it stays while either is chosen.
+- `install` also picks extras (`--extras`, the picker, or the last choice; none on a first run) and records them in `state.json`. Each chosen extra is cloned into `extras/<name>` next to the stack clone, re-cloned when its URL or branch changes, and pulled on every `install`; its skills link into the same skill dirs as the stack's, and the stack wins a name clash. Dropping an extra prunes its links and deletes its clone. `status` never pulls extras.
 - `SIFATUL_STACK_REPO` overrides the clone URL (tests and e2e runs).
 
 ## Rules

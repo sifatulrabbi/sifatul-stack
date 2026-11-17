@@ -29,7 +29,7 @@ type stackEnv struct {
 	git     source.Git
 	animate bool
 	home    string
-	choose  func(ctx context.Context, choices []ui.Choice) ([]string, error)
+	choose  func(ctx context.Context, p ui.Pick) ([]string, error)
 	found   func(h stack.Harness) bool
 }
 
@@ -48,8 +48,8 @@ func (e stackEnv) note(w io.Writer, glyph, msg string) {
 	e.print(w, glyph+" "+brand+ui.Muted.Render(" · ")+msg+"\n")
 }
 
-func (e stackEnv) step(cmd *cobra.Command, do func(ctx context.Context) (string, error)) error {
-	res := e.progress(cmd.OutOrStdout()).Run(cmd.Context(), true, ui.Task{Label: brand, Do: func(ctx context.Context) (string, error) {
+func (e stackEnv) step(cmd *cobra.Command, label string, do func(ctx context.Context) (string, error)) error {
+	res := e.progress(cmd.OutOrStdout()).Run(cmd.Context(), true, ui.Task{Label: label, Do: func(ctx context.Context) (string, error) {
 		detail, err := do(ctx)
 		return e.tilde(detail), err
 	}})
@@ -65,11 +65,37 @@ func (e stackEnv) repo() source.Repo {
 	return source.Repo{Dir: filepath.Join(e.dataDir, "stack"), URL: e.repoURL, Git: e.git}
 }
 
+func (e stackEnv) extrasDir() string { return filepath.Join(e.dataDir, "extras") }
+
+func (e stackEnv) extraRepo(x stack.Extra) source.Repo {
+	return source.Repo{Dir: filepath.Join(e.extrasDir(), x.Name), URL: x.Repo, Branch: x.Branch, Git: e.git}
+}
+
+func pickExtras(manifest []stack.Extra, names []string) []stack.Extra {
+	return slices.DeleteFunc(slices.Clone(manifest), func(x stack.Extra) bool { return !slices.Contains(names, x.Name) })
+}
+
+func extraNames(extras []stack.Extra) []string {
+	out := make([]string, len(extras))
+	for i, x := range extras {
+		out[i] = x.Name
+	}
+	return out
+}
+
 func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode stack.Mode, dropped ...string) error {
 	if err := ui.Interrupted(ctx); err != nil {
 		return err
 	}
-	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Selected: st.Harnesses, Dropped: dropped, Owned: st.Agents}.Run(mode)
+	var extras []stack.Extra
+	if mode == stack.Link || mode == stack.Status {
+		manifest, err := stack.LoadExtras(st.Source)
+		if err != nil {
+			return failed(err)
+		}
+		extras = pickExtras(manifest, st.Extras)
+	}
+	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Selected: st.Harnesses, Dropped: dropped, Owned: st.Agents, ExtrasDir: e.extrasDir(), Extras: extras}.Run(mode)
 	view := render.StackSummary
 	if mode == stack.Status {
 		view = render.StackStatus
@@ -111,7 +137,7 @@ func checkout(dir string) (string, error) {
 
 func newInstallCmd(e stackEnv) *cobra.Command {
 	var from string
-	var harnesses []string
+	var harnesses, extras []string
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Pull the latest sifatul-stack and install it into the chosen harnesses; clean up the ones you drop",
@@ -120,8 +146,11 @@ func newInstallCmd(e stackEnv) *cobra.Command {
 			"In a terminal, install asks which harnesses to install into; --harness skips the question, and without either it keeps the last choice (all on a first install). " +
 			"A harness you drop from the list is cleaned up: its links and sub-agent files are removed, and nothing is restored. A harness you never chose is never touched. " +
 			"Whatever already sits at a target path (a skill link, a global instructions file, a sub-agent file) is replaced without a backup. " +
-			"--from links your own checkout instead of the managed clone; install never pulls it.",
-		Example: "  sifatul-stack install\n  sifatul-stack install --harness claude,codex\n  sifatul-stack install --from ~/projects/sifatul-stack",
+			"--from links your own checkout instead of the managed clone; install never pulls it.\n\n" +
+			"Extras are other skill repos listed in the stack's extras.json. In a terminal, install asks which extras to add after the harnesses; --extras skips the question, and without either it keeps the last choice (none on a first install). " +
+			"Each chosen extra is cloned into the data dir, or pulled when already there, and its listed skills are linked next to the stack's own. " +
+			"An extra you drop has its links and its clone removed.",
+		Example: "  sifatul-stack install\n  sifatul-stack install --harness claude,codex\n  sifatul-stack install --extras mattpocock\n  sifatul-stack install --extras none\n  sifatul-stack install --from ~/projects/sifatul-stack",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w := cmd.OutOrStdout()
@@ -136,6 +165,18 @@ func newInstallCmd(e stackEnv) *cobra.Command {
 				return failed(err)
 			}
 			want.Harnesses = chosen
+			manifest, err := stack.LoadExtras(want.Source)
+			if err != nil {
+				return failed(err)
+			}
+			picked, err := e.chooseExtras(cmd, extras, manifest, prev, prevErr == nil)
+			if err != nil {
+				return err
+			}
+			if err := e.fetchExtras(cmd, picked); err != nil {
+				return failed(err)
+			}
+			want.Extras = extraNames(picked)
 			var dropped []string
 			if prevErr == nil {
 				want.Agents = prev.Agents
@@ -150,11 +191,18 @@ func newInstallCmd(e stackEnv) *cobra.Command {
 			if err := source.SaveState(e.statePath(), want); err != nil {
 				return failed(err)
 			}
-			return e.sync(cmd.Context(), w, want, stack.Link, dropped...)
+			err = e.sync(cmd.Context(), w, want, stack.Link, dropped...)
+			if err == nil || errors.Is(err, errFailed) {
+				if rerr := e.removeClonesExcept(want.Extras); rerr != nil {
+					return failed(rerr)
+				}
+			}
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "use this checkout of sifatul-stack instead of the managed clone; install links it and never pulls it")
 	cmd.Flags().StringSliceVar(&harnesses, "harness", nil, "install only into these harnesses: "+strings.Join(stack.Harnesses, ", ")+" (repeat or comma-separate)")
+	cmd.Flags().StringSliceVar(&extras, "extras", nil, "install exactly these extras from extras.json, or none (repeat or comma-separate)")
 	return cmd
 }
 
@@ -194,7 +242,7 @@ func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source
 			On: on, Was: hasPrev && slices.Contains(last, h.Key),
 		}
 	}
-	chosen, err := e.choose(cmd.Context(), choices)
+	chosen, err := e.choose(cmd.Context(), ui.Pick{Title: "Install sifatul-stack into which harnesses?", Choices: choices})
 	if errors.Is(err, ui.ErrCanceled) {
 		return nil, failed(errors.New("install canceled; nothing changed"))
 	}
@@ -204,17 +252,94 @@ func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source
 	return stack.ParseHarnesses(chosen)
 }
 
-func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, error) {
-	if from != "" {
-		dir, err := checkout(from)
-		if err != nil {
-			return source.State{}, err
-		}
-		e.note(cmd.OutOrStdout(), ui.Warn.Render("•"), "using your checkout at "+dir+"; pull it yourself")
-		return source.State{Source: dir}, nil
+func (e stackEnv) chooseExtras(cmd *cobra.Command, flag []string, manifest []stack.Extra, prev source.State, hasPrev bool) ([]stack.Extra, error) {
+	if cmd.Flags().Changed("extras") {
+		return parseExtras(flag, manifest)
 	}
-	repo := e.repo()
-	err := e.step(cmd, func(ctx context.Context) (string, error) {
+	var last []string
+	if hasPrev {
+		last = prev.Extras
+	}
+	if e.choose == nil || len(manifest) == 0 {
+		return pickExtras(manifest, last), nil
+	}
+	choices := make([]ui.Choice, len(manifest))
+	for i, x := range manifest {
+		detail := x.Repo
+		if x.Branch != "" {
+			detail += "@" + x.Branch
+		}
+		hint := fmt.Sprintf("%d skills", len(x.Skills))
+		if len(x.Skills) == 1 {
+			hint = "1 skill"
+		}
+		was := slices.Contains(last, x.Name)
+		choices[i] = ui.Choice{Key: x.Name, Label: x.Name, Detail: e.tilde(detail), Hint: hint, On: was, Was: was}
+	}
+	chosen, err := e.choose(cmd.Context(), ui.Pick{Title: "Install which extras?", Choices: choices, AllowEmpty: true})
+	if errors.Is(err, ui.ErrCanceled) {
+		return nil, failed(errors.New("install canceled; nothing linked"))
+	}
+	if err != nil {
+		return nil, failed(err)
+	}
+	return pickExtras(manifest, chosen), nil
+}
+
+func parseExtras(names []string, manifest []stack.Extra) ([]stack.Extra, error) {
+	var want []string
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		switch {
+		case n == "" || n == "none":
+			continue
+		case !slices.Contains(extraNames(manifest), n):
+			known := "extras.json lists none"
+			if len(manifest) > 0 {
+				known = "choose from " + strings.Join(extraNames(manifest), ", ") + ", or none"
+			}
+			return nil, fmt.Errorf("unknown extra %q; %s", n, known)
+		}
+		want = append(want, n)
+	}
+	return pickExtras(manifest, want), nil
+}
+
+func (e stackEnv) fetchExtras(cmd *cobra.Command, extras []stack.Extra) error {
+	for _, x := range extras {
+		repo := e.extraRepo(x)
+		if _, err := os.Stat(repo.Dir); err == nil && !repo.Tracks(cmd.Context()) {
+			if err := os.RemoveAll(repo.Dir); err != nil {
+				return err
+			}
+		}
+		if err := e.step(cmd, x.Name, pullOrClone(repo)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e stackEnv) removeClonesExcept(keep []string) error {
+	entries, err := os.ReadDir(e.extrasDir())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, d := range entries {
+		if !slices.Contains(keep, d.Name()) {
+			if err := os.RemoveAll(filepath.Join(e.extrasDir(), d.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func pullOrClone(repo source.Repo) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
 		cloned, err := repo.Ensure(ctx)
 		switch {
 		case err != nil:
@@ -231,8 +356,20 @@ func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, 
 		default:
 			return "already up to date at " + change.To, nil
 		}
-	})
-	if err != nil {
+	}
+}
+
+func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, error) {
+	if from != "" {
+		dir, err := checkout(from)
+		if err != nil {
+			return source.State{}, err
+		}
+		e.note(cmd.OutOrStdout(), ui.Warn.Render("•"), "using your checkout at "+dir+"; pull it yourself")
+		return source.State{Source: dir}, nil
+	}
+	repo := e.repo()
+	if err := e.step(cmd, brand, pullOrClone(repo)); err != nil {
 		return source.State{}, err
 	}
 	dir, err := checkout(repo.Dir)
@@ -262,9 +399,14 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 				kind = "managed clone"
 			}
 			chosen := stack.Chosen(st.Harnesses)
+			extras := "none"
+			if len(st.Extras) > 0 {
+				extras = strings.Join(st.Extras, ", ")
+			}
 			e.print(w, ui.Columns([][]string{
 				{ui.Accent.Render(brand), kind + ui.Muted.Render(" · "+st.Source)},
 				{ui.Accent.Render("Harnesses"), labels(chosen)},
+				{ui.Accent.Render("Extras"), extras},
 			}, "  ")+"\n")
 			return e.sync(cmd.Context(), w, st, stack.Status)
 		},

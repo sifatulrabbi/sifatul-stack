@@ -275,3 +275,51 @@ func TestPullRefusesADivergedCloneEvenWithPullRebaseSet(t *testing.T) {
 		t.Fatalf("HEAD moved from %s to %s", before, after)
 	}
 }
+
+func TestEnsureChecksOutTheChosenBranch(t *testing.T) {
+	u := newUpstream(t)
+	git(t, "-C", u.dir, "checkout", "--quiet", "-b", "next")
+	u.commit("skills/n/SKILL.md", "n\n")
+	git(t, "-C", u.dir, "checkout", "--quiet", "main")
+	r := repo(t, u)
+	r.Branch = "next"
+
+	if _, err := r.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(r.Dir, "skills", "n", "SKILL.md")); err != nil {
+		t.Fatal("the clone is not on the chosen branch")
+	}
+}
+
+func TestTracksComparesTheOriginAndBranch(t *testing.T) {
+	u := newUpstream(t)
+	git(t, "-C", u.dir, "branch", "next")
+	ctx := context.Background()
+	r := repo(t, u)
+	if r.Tracks(ctx) {
+		t.Error("a missing clone tracks nothing")
+	}
+	if _, err := r.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if !r.Tracks(ctx) {
+		t.Error("a fresh clone of the default branch should track it")
+	}
+	main := r
+	main.Branch = "main"
+	if !main.Tracks(ctx) {
+		t.Error("naming the default branch should still track")
+	}
+	next := r
+	next.Branch = "next"
+	if next.Tracks(ctx) {
+		t.Error("a clone of main does not track next")
+	}
+	moved := r
+	moved.URL = u.dir + "-moved"
+	if moved.Tracks(ctx) {
+		t.Error("a clone of another URL does not track")
+	}
+}

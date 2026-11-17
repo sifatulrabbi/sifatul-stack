@@ -1,0 +1,25 @@
+{
+  "mattpocock": {
+    "repo": "https://github.com/mattpocock/skills",
+    "branch": "main",
+    "skills": [
+      "grill-with-docs",
+      "grilling",
+      "domain-modeling",
+      "codebase-design",
+      "improve-codebase-architecture",
+      "tdd",
+      "implement",
+      "code-review",
+      "to-spec",
+      "to-tickets",
+      "setup-matt-pocock-skills",
+      "pr",
+      "wizard",
+      "handoff",
+      "teach",
+      "writing-for-agents",
+      "research"
+    ]
+  }
+}

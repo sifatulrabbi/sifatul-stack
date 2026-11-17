@@ -15,7 +15,7 @@ import (
 const DefaultURL = "https://github.com/sifatulrabbi/sifatul-stack"
 
 var (
-	ErrDirty        = errors.New("the sifatul-stack clone has local changes; commit, stash, or discard them first")
+	ErrDirty        = errors.New("the clone has local changes; commit, stash, or discard them first")
 	ErrNotInstalled = errors.New("sifatul-stack is not installed; run `sifatul-stack install` first")
 )
 
@@ -36,9 +36,10 @@ func ExecGit(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 type Repo struct {
-	Dir string
-	URL string
-	Git Git
+	Dir    string
+	URL    string
+	Branch string
+	Git    Git
 }
 
 func (r Repo) Ensure(ctx context.Context) (cloned bool, err error) {
@@ -66,7 +67,11 @@ func (r Repo) clone(ctx context.Context) error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	if _, err := r.Git(ctx, "clone", "--quiet", r.URL, tmp); err != nil {
+	args := []string{"clone", "--quiet"}
+	if r.Branch != "" {
+		args = append(args, "--branch", r.Branch)
+	}
+	if _, err := r.Git(ctx, append(args, "--", r.URL, tmp)...); err != nil {
 		return err
 	}
 	return os.Rename(tmp, r.Dir)
@@ -98,6 +103,23 @@ func (r Repo) Pull(ctx context.Context) (Change, error) {
 	return Change{From: from, To: to}, err
 }
 
+func (r Repo) Tracks(ctx context.Context) bool {
+	url, err := r.git(ctx, "remote", "get-url", "origin")
+	if err != nil || strings.TrimSpace(string(url)) != r.URL {
+		return false
+	}
+	want := r.Branch
+	if want == "" {
+		out, err := r.git(ctx, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+		if err != nil {
+			return false
+		}
+		want = strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
+	}
+	head, err := r.git(ctx, "symbolic-ref", "--short", "HEAD")
+	return err == nil && strings.TrimSpace(string(head)) == want
+}
+
 func (r Repo) head(ctx context.Context) (string, error) {
 	out, err := r.git(ctx, "rev-parse", "--short", "HEAD")
 	return strings.TrimSpace(string(out)), err
@@ -112,6 +134,7 @@ type State struct {
 	Managed   bool     `json:"managed"`
 	Harnesses []string `json:"harnesses,omitempty"`
 	Agents    []string `json:"agents,omitempty"`
+	Extras    []string `json:"extras,omitempty"`
 }
 
 func LoadState(path string) (State, error) {

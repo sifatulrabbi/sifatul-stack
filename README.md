@@ -24,4 +24,6 @@ In the chosen harnesses, `install` replaces whatever already sits at a target pa
 
 OpenCode sub-agents install switched off (`disabled: true`). Delete that line in `~/.config/opencode/agents/<agent>.md` to switch one on; later installs keep your choice.
 
+Extras are other people's skill repos, listed in [`extras.json`](extras.json) by name with a `repo`, an optional `branch` (the repo's default branch when left out), and the `skills` to link. In a terminal, `install` asks which extras to add after the harnesses, starting from your last choice (none on a first run); `install --extras mattpocock` or `--extras none` skips the question, and without a terminal or the flag it keeps the last choice. Each chosen extra is cloned into `~/.local/share/sifatul-stack/extras/<name>`, or pulled on every `install`, and each listed skill is found by its folder name anywhere in the repo and linked next to the stack's own skills, replacing whatever sits there. The stack's own skills win a name clash. An extra you drop has its links and its clone removed; a branch change in `extras.json` re-clones it.
+
 Working on the stack itself? `sifatul-stack install --from ~/path/to/checkout` links your working copy, so edits show up live; `install` never pulls it.

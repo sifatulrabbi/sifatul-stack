@@ -20,12 +20,20 @@ type Choice struct {
 	Was    bool
 }
 
-func Choose(ctx context.Context, in io.Reader, out io.Writer, title string, choices []Choice) ([]string, error) {
-	final, err := tea.NewProgram(newChooser(title, choices), tea.WithInput(in), tea.WithOutput(out), tea.WithContext(ctx)).Run()
+type Pick struct {
+	Title      string
+	Choices    []Choice
+	AllowEmpty bool
+}
+
+func Choose(ctx context.Context, in io.Reader, out io.Writer, p Pick) ([]string, error) {
+	m := newChooser(p.Title, p.Choices)
+	m.allowEmpty = p.AllowEmpty
+	final, err := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithContext(ctx)).Run()
 	if err != nil {
 		return nil, err
 	}
-	m := final.(chooser)
+	m = final.(chooser)
 	if m.canceled {
 		return nil, ErrCanceled
 	}
@@ -33,12 +41,13 @@ func Choose(ctx context.Context, in io.Reader, out io.Writer, title string, choi
 }
 
 type chooser struct {
-	title    string
-	choices  []Choice
-	cursor   int
-	empty    bool
-	done     bool
-	canceled bool
+	title      string
+	choices    []Choice
+	cursor     int
+	allowEmpty bool
+	empty      bool
+	done       bool
+	canceled   bool
 }
 
 func newChooser(title string, choices []Choice) chooser {
@@ -77,7 +86,7 @@ func (m chooser) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.choices[i].On = all
 		}
 	case "enter":
-		if len(m.selected()) == 0 {
+		if len(m.selected()) == 0 && !m.allowEmpty {
 			m.empty = true
 			return m, nil
 		}

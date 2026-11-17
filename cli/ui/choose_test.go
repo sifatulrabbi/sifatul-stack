@@ -119,12 +119,24 @@ func TestChooserViewMarksRemovalsAndClearsWhenDone(t *testing.T) {
 func TestChooseMapsCancelToErrCanceled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	got, err := Choose(ctx, strings.NewReader("q"), io.Discard, "pick", harnessChoices())
+	got, err := Choose(ctx, strings.NewReader("q"), io.Discard, Pick{Title: "pick", Choices: harnessChoices()})
 	if !errors.Is(err, ErrCanceled) || got != nil {
 		t.Errorf("q: %v, %v", got, err)
 	}
-	got, err = Choose(ctx, strings.NewReader("\r"), io.Discard, "pick", harnessChoices())
+	got, err = Choose(ctx, strings.NewReader("\r"), io.Discard, Pick{Title: "pick", Choices: harnessChoices()})
 	if err != nil || strings.Join(got, ",") != "claude,codex" {
 		t.Errorf("enter: %v, %v", got, err)
+	}
+}
+
+func TestChooserCanConfirmNothingWhenAllowed(t *testing.T) {
+	m := newChooser("Extras", harnessChoices())
+	m.allowEmpty = true
+	m, cmd := press(m, "a", "a", "enter")
+	if cmd == nil || m.canceled {
+		t.Fatal("enter with nothing selected should confirm when empty is allowed")
+	}
+	if got := m.selected(); len(got) != 0 {
+		t.Errorf("selected %v, want none", got)
 	}
 }

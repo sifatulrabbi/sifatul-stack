@@ -559,8 +559,8 @@ func TestInstallAsksWhichHarnessesInATerminal(t *testing.T) {
 	f := newFixture(t)
 	var offered []ui.Choice
 	f.env.found = func(h stack.Harness) bool { return h.Key == "codex" }
-	f.env.choose = func(_ context.Context, choices []ui.Choice) ([]string, error) {
-		offered = choices
+	f.env.choose = func(_ context.Context, p ui.Pick) ([]string, error) {
+		offered = p.Choices
 		return []string{"claude"}, nil
 	}
 
@@ -590,7 +590,7 @@ func TestInstallAsksWhichHarnessesInATerminal(t *testing.T) {
 
 func TestInstallCanceledChangesNothing(t *testing.T) {
 	f := newFixture(t)
-	f.env.choose = func(context.Context, []ui.Choice) ([]string, error) { return nil, ui.ErrCanceled }
+	f.env.choose = func(context.Context, ui.Pick) ([]string, error) { return nil, ui.ErrCanceled }
 
 	out, code := f.run("install")
 
@@ -607,7 +607,7 @@ func TestInstallCanceledChangesNothing(t *testing.T) {
 
 func TestInstallFlagSkipsThePicker(t *testing.T) {
 	f := newFixture(t)
-	f.env.choose = func(context.Context, []ui.Choice) ([]string, error) {
+	f.env.choose = func(context.Context, ui.Pick) ([]string, error) {
 		t.Error("the picker ran despite --harness")
 		return nil, nil
 	}
