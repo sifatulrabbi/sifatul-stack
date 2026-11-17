@@ -87,3 +87,21 @@ it("rejects PATCH on another user", async () => {
 - `alternative: drop`: the finding's `## Alternative` makes a false factual claim; it stays out of the review.
 - `## Evidence`: the first line is the one-line reason shown for dropped findings, so lead with the verdict's reason.
 - `## Regression test`: the test that went red on the bug or mutation, for confirmed bugs and missing tests; omit otherwise.
+
+## Fix outcomes: `fixes.md`
+
+One list item per finding the fixers took, in the order they were settled. No frontmatter.
+
+```markdown
+# Fixes
+
+- security-1: fixed in a1b2c3d. requireOwner before load; regression test added.
+- correctness-3: fixed in d4e5f6a. Also updated billing/invoice.ts and its test, which asserted the old rounding.
+- tests-4: handed off. The fix also needs src/jobs/retry.ts.
+- api-1: needs impact decision, commit 9f8e7d6. GET /orders `total` becomes a number; web and mobile clients read it as a string.
+- data-1: blocked. Proving the fix needs Postgres 15; run `docker compose up db` or give a DSN.
+- architecture-1: deferred. The fix becomes moving authz into middleware; scope call needed.
+```
+
+- Outcomes: `fixed in <sha>`, `handed off` (junior fixer only), `needs impact decision`, `blocked`, `deferred`.
+- Every open item ends with what the user must decide or provide.
