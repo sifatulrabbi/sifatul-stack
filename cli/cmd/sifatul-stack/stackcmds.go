@@ -125,7 +125,7 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 			"Clones sifatul-stack into the data dir (or uses --from), links skills and global instructions, and renders the named sub-agents. " +
 			"In a terminal, setup asks which harnesses to install into; --harness skips the question, and without either it keeps the last choice (all on a first setup). " +
 			"A harness you drop is cleaned up the same way `sifatul-stack remove` would. " +
-			"An existing global instructions file is backed up first; `sifatul-stack remove` restores it. " +
+			"An existing global instructions file is backed up first as <file>.sifatul-stack-backup-<time>; `sifatul-stack remove` restores the newest such backup. " +
 			"Anything at a target path that sifatul-stack doesn't own is reported as a conflict and left alone.",
 		Example: "  sifatul-stack setup\n  sifatul-stack setup --harness claude,codex\n  sifatul-stack setup --from ~/projects/sifatul-stack",
 		Args:    cobra.NoArgs,

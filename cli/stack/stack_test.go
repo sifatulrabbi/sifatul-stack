@@ -145,7 +145,7 @@ func TestLinkFreshHome(t *testing.T) {
 	assertLinksTo(t, filepath.Join(l.Claude, "CLAUDE.md"), instructions)
 	assertLinksTo(t, filepath.Join(l.Codex, "AGENTS.md"), instructions)
 	assertLinksTo(t, filepath.Join(l.OpenCode, "AGENTS.md"), instructions)
-	if got := read(t, filepath.Join(l.Claude, "CLAUDE.md.backup-20261116120000")); got != "old global\n" {
+	if got := read(t, filepath.Join(l.Claude, "CLAUDE.md.sifatul-stack-backup-20261116120000")); got != "old global\n" {
 		t.Errorf("backup = %q", got)
 	}
 
@@ -727,22 +727,44 @@ func TestOpenCodeChoiceSurvivesDetachThenLink(t *testing.T) {
 func TestUnlinkRestoresTheNewestBackupItMade(t *testing.T) {
 	s := newSyncer(t, fixtureSource(t))
 	claudeMD := filepath.Join(s.Layout.Claude, "CLAUDE.md")
-	write(t, claudeMD+".backup-20260101000000", "older\n")
+	write(t, claudeMD+".sifatul-stack-backup-20260101000000", "older\n")
 	write(t, claudeMD, "newest\n")
 	run(t, s, stack.Link)
-	write(t, claudeMD+".backup-old", "not ours\n")
-	write(t, claudeMD+".backup-99999999999999", "not a time\n")
+	write(t, claudeMD+".sifatul-stack-backup-old", "not ours\n")
 
 	run(t, s, stack.Unlink)
 
 	if got := read(t, claudeMD); got != "newest\n" {
 		t.Errorf("CLAUDE.md = %q, want the newest backup setup made", got)
 	}
-	if got := read(t, claudeMD+".backup-old"); got != "not ours\n" {
+	if got := read(t, claudeMD+".sifatul-stack-backup-old"); got != "not ours\n" {
 		t.Errorf("foreign backup changed: %q", got)
 	}
-	if got := read(t, claudeMD+".backup-20260101000000"); got != "older\n" {
+	if got := read(t, claudeMD+".sifatul-stack-backup-20260101000000"); got != "older\n" {
 		t.Errorf("older backup changed: %q", got)
+	}
+}
+
+func TestUnlinkLeavesBackupsItNeverMadeAlone(t *testing.T) {
+	for _, name := range []string{
+		"CLAUDE.md.backup-old",
+		"CLAUDE.md.backup-20250101000000",
+		"CLAUDE.md.sifatul-stack-backup-old",
+		"CLAUDE.md.sifatul-stack-backup-99999999999999",
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSyncer(t, fixtureSource(t))
+			backup := filepath.Join(s.Layout.Claude, name)
+			write(t, backup, "other tool\n")
+			run(t, s, stack.Link)
+
+			run(t, s, stack.Unlink)
+
+			assertMissing(t, filepath.Join(s.Layout.Claude, "CLAUDE.md"))
+			if got := read(t, backup); got != "other tool\n" {
+				t.Errorf("backup changed: %q", got)
+			}
+		})
 	}
 }
 

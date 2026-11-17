@@ -23,7 +23,7 @@ func freshSetup() []stack.Row {
 		rows = append(rows, row("skill", sk, "claude", "linked", "linked"), row("skill", sk, "agents", "linked", "linked"))
 	}
 	rows = append(rows,
-		stack.Row{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.BackedUp, Change: stack.DidBackUp, Detail: "CLAUDE.md.backup-20261116120000"},
+		stack.Row{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.BackedUp, Change: stack.DidBackUp, Detail: "CLAUDE.md.sifatul-stack-backup-20261116120000"},
 		row("instructions", "AGENTS.md", "claude", "linked", "linked"),
 		row("instructions", "AGENTS.md", "codex", "linked", ""),
 		row("agent", "senior", "claude", "current", ""),
@@ -50,7 +50,7 @@ func TestStackSummaryGroupsChangesByKind(t *testing.T) {
 		"+ new  a, b, c, d, e, f, and 2 more",
 		"Instructions  ✓ linked into Claude Code, Codex",
 		"+ new  Claude Code",
-		"• backed up  Claude Code (CLAUDE.md.backup-20261116120000)",
+		"• backed up  Claude Code (CLAUDE.md.sifatul-stack-backup-20261116120000)",
 		"Sub-agents    ✓ 1 rendered for Claude Code, Codex, OpenCode",
 		"~ re-rendered  senior (Codex)",
 		"○ 1 off in OpenCode",

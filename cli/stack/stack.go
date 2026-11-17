@@ -338,7 +338,7 @@ func (r *run) linkInstructions(harness, dst string) {
 			r.did(kind, name, harness, Missing, "", dst)
 			return
 		}
-		backup := dst + ".backup-" + r.Now().Format("20060102150405")
+		backup := dst + backupInfix + r.Now().Format(backupStamp)
 		if err := os.Rename(dst, backup); err != nil {
 			r.fail(kind, name, harness, err)
 			return
@@ -348,13 +348,16 @@ func (r *run) linkInstructions(harness, dst string) {
 	r.linkPath(kind, name, harness, src, dst)
 }
 
-const backupStamp = "20060102150405"
+const (
+	backupInfix = ".sifatul-stack-backup-"
+	backupStamp = "20060102150405"
+)
 
 func newestBackup(dst string) string {
 	entries, _ := os.ReadDir(filepath.Dir(dst))
 	newest, at := "", time.Time{}
 	for _, e := range entries {
-		stamp, ok := strings.CutPrefix(e.Name(), filepath.Base(dst)+".backup-")
+		stamp, ok := strings.CutPrefix(e.Name(), filepath.Base(dst)+backupInfix)
 		t, err := time.Parse(backupStamp, stamp)
 		if ok && err == nil && (newest == "" || t.After(at)) {
 			newest, at = filepath.Join(filepath.Dir(dst), e.Name()), t
