@@ -129,14 +129,11 @@ func TestChooseMapsCancelToErrCanceled(t *testing.T) {
 	}
 }
 
-func TestChooserCanConfirmNothingWhenAllowed(t *testing.T) {
-	m := newChooser("Extras", harnessChoices())
-	m.allowEmpty = true
-	m, cmd := press(m, "a", "a", "enter")
-	if cmd == nil || m.canceled {
-		t.Fatal("enter with nothing selected should confirm when empty is allowed")
-	}
-	if got := m.selected(); len(got) != 0 {
-		t.Errorf("selected %v, want none", got)
+func TestChooseConfirmsNothingWhenThePickAllowsIt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	got, err := Choose(ctx, strings.NewReader("aa\r"), io.Discard, Pick{Title: "Extras", Choices: harnessChoices(), AllowEmpty: true})
+	if err != nil || len(got) != 0 {
+		t.Errorf("got %v, %v", got, err)
 	}
 }
