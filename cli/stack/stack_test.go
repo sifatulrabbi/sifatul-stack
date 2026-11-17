@@ -420,7 +420,6 @@ func TestRejectsModelsTSVFieldsThatEscape(t *testing.T) {
 		value string
 	}{
 		"tier traversal":   {0, "../config"},
-		"tier uppercase":   {0, "Senior"},
 		"model newline":    {2, "opus\rpermissionMode: bypassPermissions"},
 		"model quote":      {2, `gpt"`},
 		"model space":      {2, "gpt 5"},
@@ -442,6 +441,23 @@ func TestRejectsModelsTSVFieldsThatEscape(t *testing.T) {
 			}
 			assertMissing(t, filepath.Join(s.Layout.Codex, "config.toml"))
 		})
+	}
+}
+
+func TestRejectsUppercaseTier(t *testing.T) {
+	src := fixtureSource(t)
+	tsv := filepath.Join(src, "agents", "models.tsv")
+	lines := strings.Split(read(t, tsv), "\n")
+	for i, l := range lines {
+		if rest, ok := strings.CutPrefix(l, "senior\t"); ok {
+			lines[i] = "Senior\t" + rest
+		}
+	}
+	write(t, tsv, strings.Join(lines, "\n"))
+	write(t, filepath.Join(src, "agents", "Senior.md"), read(t, filepath.Join(src, "agents", "senior.md")))
+
+	if _, err := newSyncer(t, src).Run(stack.Link); err == nil || !strings.Contains(err.Error(), "tier must match") {
+		t.Errorf("err = %v, want one saying the tier must match", err)
 	}
 }
 
