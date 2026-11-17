@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
@@ -139,6 +143,71 @@ func TestFinishStripsTerminalEscapesFromErrors(t *testing.T) {
 func TestFinishStaysQuietWhenAProviderFailed(t *testing.T) {
 	var buf bytes.Buffer
 	if code := finish(&buf, errProviderFailed); code != 1 || buf.Len() != 0 {
+		t.Fatalf("code = %d, out = %q", code, buf.String())
+	}
+}
+
+type blockingProvider struct{ started chan struct{} }
+
+func (blockingProvider) Name() string { return "claude" }
+
+func (b blockingProvider) Usage(ctx context.Context) (usage.Report, error) {
+	close(b.started)
+	<-ctx.Done()
+	return usage.Report{}, ctx.Err()
+}
+
+func TestInterruptedUsagePrintsNothingAndExits130(t *testing.T) {
+	for _, args := range [][]string{nil, {"--json"}} {
+		p := blockingProvider{started: make(chan struct{})}
+		ctx, interrupt := context.WithCancelCause(context.Background())
+		go func() {
+			<-p.started
+			interrupt(ui.ErrInterrupted)
+		}()
+		cmd := newUsageCmd(app{providers: []usage.Provider{p}, now: fixedNow})
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(args)
+		code := finish(&out, cmd.ExecuteContext(ctx))
+		if code != 130 || out.Len() != 0 {
+			t.Fatalf("%v: code = %d, out = %q", args, code, out.String())
+		}
+	}
+}
+
+func TestFirstInterruptCancelsAndSecondExits130(t *testing.T) {
+	exited := make(chan int, 1)
+	ctx, stop := interruptible(context.Background(), func(code int) { exited <- code })
+	defer stop()
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("first SIGINT did not cancel")
+	}
+	if !errors.Is(ui.Interrupted(ctx), ui.ErrInterrupted) {
+		t.Fatalf("cause = %v", context.Cause(ctx))
+	}
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-exited:
+		if code != 130 {
+			t.Fatalf("exit code = %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second SIGINT did not exit")
+	}
+}
+
+func TestFinishTreatsAnInterruptAsQuiet130(t *testing.T) {
+	var buf bytes.Buffer
+	if code := finish(&buf, failed(fmt.Errorf("git clone: %w", ui.ErrInterrupted))); code != 130 || buf.Len() != 0 {
 		t.Fatalf("code = %d, out = %q", code, buf.String())
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,10 +23,44 @@ import (
 )
 
 func main() {
-	os.Exit(finish(os.Stderr, newRootCmd(defaultApp()).ExecuteContext(context.Background())))
+	ctx, stop := interruptible(context.Background(), os.Exit)
+	err := newRootCmd(defaultApp()).ExecuteContext(ctx)
+	if ui.Interrupted(ctx) != nil {
+		err = ui.ErrInterrupted
+	}
+	stop()
+	os.Exit(finish(os.Stderr, err))
+}
+
+func interruptible(parent context.Context, exit func(int)) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(parent)
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-signals:
+		case <-done:
+			return
+		}
+		cancel(ui.ErrInterrupted)
+		select {
+		case <-signals:
+			exit(interruptedCode)
+		case <-done:
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(signals)
+		close(done)
+		cancel(nil)
+	}
 }
 
 func finish(w io.Writer, err error) int {
+	if errors.Is(err, ui.ErrInterrupted) {
+		return interruptedCode
+	}
 	if err != nil && !errors.Is(err, errProviderFailed) {
 		ui.Print(w, ui.Bad.Render("✗ error:")+" "+ui.Safe(err.Error())+"\n")
 	}

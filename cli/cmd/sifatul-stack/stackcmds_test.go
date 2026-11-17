@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -101,12 +102,17 @@ func (f fixture) clone() string { return filepath.Join(f.env.dataDir, "stack") }
 
 func (f fixture) run(args ...string) (string, int) {
 	f.t.Helper()
+	return f.runContext(context.Background(), args...)
+}
+
+func (f fixture) runContext(ctx context.Context, args ...string) (string, int) {
+	f.t.Helper()
 	cmd := newRootCmd(app{stack: f.env})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs(args)
-	code := finish(&out, cmd.ExecuteContext(context.Background()))
+	code := finish(&out, cmd.ExecuteContext(ctx))
 	return out.String(), code
 }
 
@@ -482,5 +488,46 @@ func TestStackErrorsCarryNoInternalPrefix(t *testing.T) {
 	out, code := f.run("update")
 	if code != 1 || strings.Contains(out, "stack: ") || !strings.Contains(out, "✗ error: sifatul-stack is not set up") {
 		t.Fatalf("exit = %d, out = %q", code, out)
+	}
+}
+
+func TestInterruptedUpdateStopsBeforeSyncingAndExits130(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup")
+	ctx, interrupt := context.WithCancelCause(context.Background())
+	f.env.git = func(gctx context.Context, args ...string) ([]byte, error) {
+		if slices.Contains(args, "pull") {
+			interrupt(ui.ErrInterrupted)
+			<-gctx.Done()
+			return nil, gctx.Err()
+		}
+		return source.ExecGit(gctx, args...)
+	}
+	out, code := f.runContext(ctx, "update")
+	if code != 130 || strings.Contains(out, "✗") || strings.Contains(out, "skills") {
+		t.Fatalf("code = %d, out:\n%s", code, out)
+	}
+}
+
+func TestInterruptedSetupSavesNoStateAndExits130(t *testing.T) {
+	f := newFixture(t)
+	ctx, interrupt := context.WithCancelCause(context.Background())
+	f.env.git = func(gctx context.Context, args ...string) ([]byte, error) {
+		if slices.Contains(args, "clone") {
+			interrupt(ui.ErrInterrupted)
+			<-gctx.Done()
+			return nil, gctx.Err()
+		}
+		return source.ExecGit(gctx, args...)
+	}
+	out, code := f.runContext(ctx, "setup")
+	if code != 130 || strings.Contains(out, "✗") {
+		t.Fatalf("code = %d, out:\n%s", code, out)
+	}
+	if _, err := os.Stat(f.env.statePath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state.json written after interrupt: %v", err)
+	}
+	if f.installed("claude") {
+		t.Fatal("setup linked claude after interrupt")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const DefaultURL = "https://github.com/sifatulrabbi/sifatul-stack"
@@ -18,11 +19,15 @@ var (
 	ErrNotSetUp = errors.New("sifatul-stack is not set up; run `sifatul-stack setup` first")
 )
 
+const gitGrace = 5 * time.Second
+
 type Git func(ctx context.Context, args ...string) ([]byte, error)
 
 func ExecGit(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = gitGrace
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))

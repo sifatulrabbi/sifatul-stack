@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -11,6 +12,15 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 )
+
+var ErrInterrupted = errors.New("interrupted")
+
+func Interrupted(ctx context.Context) error {
+	if errors.Is(context.Cause(ctx), ErrInterrupted) {
+		return ErrInterrupted
+	}
+	return nil
+}
 
 type Task struct {
 	Label string
@@ -35,7 +45,7 @@ func (p Progress) Run(ctx context.Context, keep bool, tasks ...Task) []Result {
 	results := make([]Result, len(tasks))
 	var prog *tea.Program
 	if p.Animate {
-		prog = tea.NewProgram(newModel(tasks, keep), tea.WithOutput(p.Out), tea.WithInput(nil), tea.WithContext(ctx))
+		prog = tea.NewProgram(newModel(tasks, keep), tea.WithOutput(p.Out), tea.WithInput(nil), tea.WithContext(ctx), tea.WithoutSignalHandler())
 	}
 	var wg sync.WaitGroup
 	for i, t := range tasks {
@@ -58,7 +68,7 @@ func (p Progress) Run(ctx context.Context, keep bool, tasks ...Task) []Result {
 		}
 	}
 	wg.Wait()
-	if keep {
+	if keep && Interrupted(ctx) == nil {
 		var b strings.Builder
 		for i, t := range tasks {
 			b.WriteString(line(t.Label, results[i]) + "\n")

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sifatulrabbi/sifatul-stack/cli/source"
 )
@@ -217,5 +218,31 @@ func TestEnsureRefusesACloneWithNothingCheckedOut(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "delete "+r.Dir) {
 		t.Fatalf("err = %v, want one saying to delete %s", err, r.Dir)
+	}
+}
+
+func TestExecGitLetsGitCleanUpWhenCanceled(t *testing.T) {
+	bin := t.TempDir()
+	started, cleaned := filepath.Join(bin, "started"), filepath.Join(bin, "cleaned")
+	script := "#!/bin/sh\ntrap 'touch \"" + cleaned + "\"; exit 130' INT\ntouch \"" + started + "\"\nwhile :; do sleep 0.05; done\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for {
+			if _, err := os.Stat(started); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	if _, err := source.ExecGit(ctx, "pull"); err == nil {
+		t.Fatal("canceled git reported success")
+	}
+	if _, err := os.Stat(cleaned); err != nil {
+		t.Fatalf("git got no chance to clean up: %v", err)
 	}
 }

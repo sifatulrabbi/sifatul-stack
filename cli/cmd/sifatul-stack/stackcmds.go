@@ -57,6 +57,9 @@ func (e stackEnv) step(cmd *cobra.Command, do func(ctx context.Context) (string,
 		detail, err := do(ctx)
 		return e.tilde(detail), err
 	}})
+	if err := ui.Interrupted(cmd.Context()); err != nil {
+		return err
+	}
 	return res[0].Err
 }
 
@@ -66,7 +69,10 @@ func (e stackEnv) repo() source.Repo {
 	return source.Repo{Dir: filepath.Join(e.dataDir, "stack"), URL: e.repoURL, Git: e.git}
 }
 
-func (e stackEnv) sync(w io.Writer, st source.State, mode stack.Mode) error {
+func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode stack.Mode) error {
+	if err := ui.Interrupted(ctx); err != nil {
+		return err
+	}
 	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Now: e.now, Selected: st.Harnesses}.Run(mode)
 	view := render.StackSummary
 	if mode == stack.Status {
@@ -135,14 +141,14 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 			want.Harnesses = chosen
 			if prevErr == nil && prev.Source != want.Source {
 				e.note(w, ui.Warn.Render("•"), "switching from "+prev.Source)
-				if err := e.sync(w, prev, stack.Detach); err != nil {
+				if err := e.sync(cmd.Context(), w, prev, stack.Detach); err != nil {
 					return err
 				}
 			}
 			if err := source.SaveState(e.statePath(), want); err != nil {
 				return failed(err)
 			}
-			return e.sync(w, want, stack.Link)
+			return e.sync(cmd.Context(), w, want, stack.Link)
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "use this checkout of sifatul-stack instead of a managed clone (edits show up live)")
@@ -256,7 +262,7 @@ func newUpdateCmd(e stackEnv) *cobra.Command {
 			} else {
 				e.note(w, ui.Warn.Render("•"), st.Source+" is your checkout; pull it yourself")
 			}
-			return e.sync(w, st, stack.Link)
+			return e.sync(cmd.Context(), w, st, stack.Link)
 		},
 	}
 }
@@ -285,7 +291,7 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 				{ui.Accent.Render(brand), kind + ui.Muted.Render(" · "+st.Source)},
 				{ui.Accent.Render("Harnesses"), labels(chosen)},
 			}, "  ")+"\n")
-			return e.sync(w, st, stack.Status)
+			return e.sync(cmd.Context(), w, st, stack.Status)
 		},
 	}
 }
@@ -301,7 +307,7 @@ func newRemoveCmd(e stackEnv) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := e.sync(w, st, stack.Unlink); err != nil {
+			if err := e.sync(cmd.Context(), w, st, stack.Unlink); err != nil {
 				return err
 			}
 			if err := os.Remove(e.statePath()); err != nil {

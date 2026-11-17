@@ -29,6 +29,8 @@ type exitError struct {
 func (e exitError) Error() string { return e.err.Error() }
 func (e exitError) Unwrap() error { return e.err }
 
+const interruptedCode = 130
+
 func failed(err error) error { return exitError{code: 1, err: err} }
 
 func exitCode(err error) int {
@@ -97,6 +99,9 @@ func newUsageCmd(a app) *cobra.Command {
 				reports = usage.Collect(ctx, selected)
 			} else {
 				reports = a.fetchWithProgress(ctx, cmd.OutOrStdout(), selected)
+			}
+			if err := ui.Interrupted(ctx); err != nil {
+				return err
 			}
 
 			write := a.text.Text
