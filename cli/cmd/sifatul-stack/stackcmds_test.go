@@ -203,6 +203,26 @@ func TestInstallRefusesADirtyClone(t *testing.T) {
 	}
 }
 
+func TestInstallReclonesTheStackWhenItsRepoChanged(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("install", "--harness", "claude")
+	moved := resolved(t, t.TempDir())
+	gitT(t, "clone", "--quiet", f.upstream, moved)
+	writeFile(t, filepath.Join(moved, "skills", "moved", "SKILL.md"), "---\nname: moved\ndescription: test\n---\n")
+	gitT(t, "-C", moved, "add", "-A")
+	gitT(t, "-C", moved, "commit", "--quiet", "-m", "moved")
+	f.env.repoURL = moved
+
+	out := f.mustRun("install")
+
+	if !strings.Contains(out, "sifatul-stack · cloned "+moved) {
+		t.Errorf("output lacks the re-clone line:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(f.clone(), "skills", "moved", "SKILL.md")); err != nil {
+		t.Error("the stack clone still follows the old repo")
+	}
+}
+
 func TestStatusBeforeInstallPointsToInstall(t *testing.T) {
 	f := newFixture(t)
 	if out := f.mustRun("status"); !strings.Contains(out, "not installed; run `sifatul-stack install`") {
