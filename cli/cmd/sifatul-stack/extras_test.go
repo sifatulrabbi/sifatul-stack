@@ -210,3 +210,28 @@ func TestInstallRemovesADroppedCloneEvenWhenAnExtraSkillFails(t *testing.T) {
 		t.Error("dropped clone kept")
 	}
 }
+
+func TestInstallCanceledAtTheExtrasPickerChangesNothing(t *testing.T) {
+	f := newFixture(t)
+	up := newExtraUpstream(t, "skills/tdd")
+	f.publishExtras(map[string]manifestEntry{"mp": {Repo: up, Skills: []string{"tdd"}}})
+	f.mustRun("install", "--harness", "claude", "--extras", "mp")
+	f.env.choose = func(_ context.Context, p ui.Pick) ([]string, error) {
+		if strings.Contains(p.Title, "extras") {
+			return nil, ui.ErrCanceled
+		}
+		return []string{"claude"}, nil
+	}
+
+	out, code := f.run("install")
+
+	if code == 0 || !strings.Contains(out, "canceled") {
+		t.Errorf("exit %d:\n%s", code, out)
+	}
+	if _, err := os.Lstat(f.claudeSkill("tdd")); err != nil {
+		t.Error("cancel changed links")
+	}
+	if _, err := os.Stat(f.extraClone("mp")); err != nil {
+		t.Error("cancel deleted the clone")
+	}
+}
