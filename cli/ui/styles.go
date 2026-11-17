@@ -3,6 +3,7 @@ package ui
 import (
 	"io"
 	"strings"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -85,3 +86,11 @@ func Print(w io.Writer, s string) error {
 }
 
 func Plain(s string) string { return ansi.Strip(s) }
+func Safe(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return -1
+		}
+		return r
+	}, ansi.Strip(s))
+}

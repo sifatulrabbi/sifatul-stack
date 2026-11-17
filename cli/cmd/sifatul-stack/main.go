@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,11 +22,14 @@ import (
 )
 
 func main() {
-	err := newRootCmd(defaultApp()).ExecuteContext(context.Background())
+	os.Exit(finish(os.Stderr, newRootCmd(defaultApp()).ExecuteContext(context.Background())))
+}
+
+func finish(w io.Writer, err error) int {
 	if err != nil && !errors.Is(err, errProviderFailed) {
-		ui.Print(os.Stderr, ui.Bad.Render("✗ error:")+" "+err.Error()+"\n")
+		ui.Print(w, ui.Bad.Render("✗ error:")+" "+ui.Safe(err.Error())+"\n")
 	}
-	os.Exit(exitCode(err))
+	return exitCode(err)
 }
 
 func defaultApp() app {

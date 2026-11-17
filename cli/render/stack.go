@@ -30,7 +30,17 @@ var changeOrder = []struct {
 
 const listLimit = 6
 
+func safeRows(rows []stack.Row) []stack.Row {
+	out := make([]stack.Row, len(rows))
+	for i, r := range rows {
+		r.Kind, r.Name, r.Harness, r.Detail = ui.Safe(r.Kind), ui.Safe(r.Name), ui.Safe(r.Harness), ui.Safe(r.Detail)
+		out[i] = r
+	}
+	return out
+}
+
 func StackSummary(rows []stack.Row) string {
+	rows = safeRows(rows)
 	var table [][]string
 	for _, k := range kinds {
 		ofKind := filterRows(rows, func(r stack.Row) bool { return r.Kind == k.kind && r.State != stack.Conflict })
@@ -73,6 +83,7 @@ func StackSummary(rows []stack.Row) string {
 }
 
 func StackStatus(rows []stack.Row) string {
+	rows = safeRows(rows)
 	var table [][]string
 	needsUpdate := false
 	for _, k := range kinds {

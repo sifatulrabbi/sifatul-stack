@@ -124,3 +124,21 @@ func TestPrettyWithoutJSONExitsTwo(t *testing.T) {
 		t.Fatalf("exit = %d, err = %v", exitCode(err), err)
 	}
 }
+
+func TestFinishStripsTerminalEscapesFromErrors(t *testing.T) {
+	t.Setenv("TTY_FORCE", "1")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("COLORTERM", "truecolor")
+	var buf bytes.Buffer
+	code := finish(&buf, errors.New("git pull: remote: \x1b]52;c;ZWNobyBwd25lZA==\x07hi"))
+	if code != 2 || strings.Contains(buf.String(), "\x1b]") || strings.Contains(buf.String(), "\x07") || !strings.Contains(buf.String(), "remote: hi") {
+		t.Fatalf("code = %d, out = %q", code, buf.String())
+	}
+}
+
+func TestFinishStaysQuietWhenAProviderFailed(t *testing.T) {
+	var buf bytes.Buffer
+	if code := finish(&buf, errProviderFailed); code != 1 || buf.Len() != 0 {
+		t.Fatalf("code = %d, out = %q", code, buf.String())
+	}
+}

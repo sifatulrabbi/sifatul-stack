@@ -103,3 +103,24 @@ func TestTransientModelClearsWhenDone(t *testing.T) {
 		t.Errorf("transient view = %q", v)
 	}
 }
+
+func TestProgressLinesStripTerminalEscapes(t *testing.T) {
+	osc := "\x1b]52;c;ZWNobyBwd25lZA==\x07"
+	for _, out := range []string{
+		line("label"+osc, Result{Err: errors.New("git: fatal" + osc)}),
+		line("label", Result{Detail: "abc\r" + osc}),
+		newModel([]Task{{Label: "clone" + osc}}, false).View().Content,
+	} {
+		for _, bad := range []string{"\x1b]", "\x07", "\r"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("line carries %q: %q", bad, out)
+			}
+		}
+	}
+}
+
+func TestSafeKeepsTextAndLayoutWhitespace(t *testing.T) {
+	if got := Safe("a\tb\nc\x1b[31md\x1b[0m\u0085e\x00f"); got != "a\tb\ncdef" {
+		t.Errorf("Safe = %q", got)
+	}
+}

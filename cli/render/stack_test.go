@@ -113,3 +113,20 @@ func TestStackStatusWithEverythingInPlaceHasNoHint(t *testing.T) {
 		t.Errorf("status:\n%s", buf.String())
 	}
 }
+
+func TestStackOutputStripsEscapesFromRepoNames(t *testing.T) {
+	evil := "x" + "\x1b]52;c;ZWNobyBwd25lZA==\x07"
+	rows := []stack.Row{
+		row("skill", evil, "claude", stack.Linked, stack.DidLink),
+		row("skill", evil+"2", "claude", stack.Missing, ""),
+		{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.BackedUp, Change: stack.DidBackUp, Detail: "CLAUDE.md.backup-1\x07"},
+		{Kind: "skill", Name: evil, Harness: "agents", State: stack.Conflict, Detail: "/h/" + evil},
+	}
+	for name, out := range map[string]string{"summary": StackSummary(rows), "status": StackStatus(rows)} {
+		for _, bad := range []string{"\x1b]", "\x07"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("%s carries %q:\n%q", name, bad, out)
+			}
+		}
+	}
+}

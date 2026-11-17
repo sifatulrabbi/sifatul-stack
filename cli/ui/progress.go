@@ -31,6 +31,7 @@ type Progress struct {
 func (p Progress) Run(ctx context.Context, keep bool, tasks ...Task) []Result {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	tasks = safeTasks(tasks)
 	results := make([]Result, len(tasks))
 	var prog *tea.Program
 	if p.Animate {
@@ -67,13 +68,22 @@ func (p Progress) Run(ctx context.Context, keep bool, tasks ...Task) []Result {
 	return results
 }
 
+func safeTasks(tasks []Task) []Task {
+	out := make([]Task, len(tasks))
+	for i, t := range tasks {
+		out[i] = Task{Label: Safe(t.Label), Do: t.Do}
+	}
+	return out
+}
+
 func line(label string, r Result) string {
+	label = Safe(label)
 	if r.Err != nil {
-		return Bad.Render("✗") + " " + label + Muted.Render(" · ") + Bad.Render(r.Err.Error())
+		return Bad.Render("✗") + " " + label + Muted.Render(" · ") + Bad.Render(Safe(r.Err.Error()))
 	}
 	s := OK.Render("✓") + " " + label
 	if r.Detail != "" {
-		s += Muted.Render(" · ") + r.Detail
+		s += Muted.Render(" · ") + Safe(r.Detail)
 	}
 	if r.Took >= 100*time.Millisecond {
 		s += Muted.Render(fmt.Sprintf("  %.1fs", r.Took.Seconds()))
@@ -97,7 +107,7 @@ type model struct {
 
 func newModel(tasks []Task, keep bool) model {
 	return model{
-		tasks:   tasks,
+		tasks:   safeTasks(tasks),
 		results: make([]*Result, len(tasks)),
 		keep:    keep,
 		spin:    spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(Accent)),

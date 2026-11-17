@@ -264,3 +264,43 @@ func TestSpendWindowSaysWhatItIsAPercentOf(t *testing.T) {
 		}
 	}
 }
+
+const osc52 = "\x1b]52;c;ZWNobyBwd25lZA==\x07"
+
+func assertNoTerminalControl(t *testing.T, out string) {
+	t.Helper()
+	for _, bad := range []string{"\x1b]", "\x1b[2J", "\x07", "\r", "\u009b"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("output carries %q to the terminal:\n%q", bad, out)
+		}
+	}
+}
+
+func TestTextViewStripsTerminalEscapesFromProviderStrings(t *testing.T) {
+	for _, env := range [][2]string{{"COLORTERM", "truecolor"}, {"NO_COLOR", "1"}} {
+		t.Run(env[0], func(t *testing.T) {
+			t.Setenv("TTY_FORCE", "1")
+			t.Setenv("TERM", "xterm-256color")
+			t.Setenv(env[0], env[1])
+			asOf := now.Add(-time.Hour)
+			reports := []usage.Report{
+				{Provider: "codex", Plan: "pro" + osc52, Stale: true, AsOf: &asOf, Source: "cache\r", Extras: map[string]string{"credits\u009b2J": "\x1b[2J\x1b[H9.99"},
+					Windows: []usage.Window{
+						{Name: "weekly:\x1b]8;;https://evil.example\x07click\x1b]8;;\x07", UsedPercent: 10},
+						{Name: "extra_usage", Spend: true, Budget: &usage.Budget{Spent: 1, Limit: 2, Currency: "X" + osc52}},
+					}},
+				{Provider: "claude", Error: "boom " + osc52},
+			}
+			var buf bytes.Buffer
+			if err := (TextView{Color: true}).Text(&buf, reports, now); err != nil {
+				t.Fatal(err)
+			}
+			assertNoTerminalControl(t, buf.String())
+			for _, want := range []string{"pro", "boom", "click", "9.99"} {
+				if !strings.Contains(buf.String(), want) {
+					t.Errorf("output lost %q:\n%q", want, buf.String())
+				}
+			}
+		})
+	}
+}
