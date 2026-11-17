@@ -246,3 +246,26 @@ func TestExecGitLetsGitCleanUpWhenCanceled(t *testing.T) {
 		t.Fatalf("git got no chance to clean up: %v", err)
 	}
 }
+
+func TestPullRefusesADivergedCloneAndKeepsLocalCommits(t *testing.T) {
+	u := newUpstream(t)
+	r := repo(t, u)
+	ctx := context.Background()
+	if _, err := r.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.Dir, "local.md"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, "-C", r.Dir, "add", "-A")
+	git(t, "-C", r.Dir, "commit", "--quiet", "-m", "local")
+	before := git(t, "-C", r.Dir, "rev-parse", "HEAD")
+	u.commit("skills/b/SKILL.md", "b\n")
+
+	if _, err := r.Pull(ctx); err == nil {
+		t.Fatal("pull accepted a diverged clone")
+	}
+	if after := git(t, "-C", r.Dir, "rev-parse", "HEAD"); after != before {
+		t.Fatalf("HEAD moved from %s to %s", before, after)
+	}
+}

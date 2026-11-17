@@ -130,3 +130,68 @@ func TestStackOutputStripsEscapesFromRepoNames(t *testing.T) {
 		}
 	}
 }
+
+func plainStatus(t *testing.T, rows []stack.Row) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := ui.Print(&buf, StackStatus(rows)); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func TestStackStatusFlagsConflictsWithoutAnUpdateHint(t *testing.T) {
+	out := plainStatus(t, []stack.Row{
+		{Kind: "skill", Name: "x", Harness: "claude", State: stack.Conflict, Detail: "/h/.claude/skills/x exists"},
+		row("skill", "y", "claude", stack.Linked, ""),
+	})
+	for _, want := range []string{"! conflict", "! 1 conflict, left alone", "/h/.claude/skills/x exists"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "✓ conflict") || strings.Contains(out, "sifatul-stack update") {
+		t.Errorf("status:\n%s", out)
+	}
+}
+
+func TestStackStatusAsksForUpdateOnOrphansAndBlockedLinks(t *testing.T) {
+	for _, r := range []stack.Row{
+		row("agent", "gone", "claude", stack.Orphaned, ""),
+		{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.Missing, Detail: "/h/.claude/CLAUDE.md"},
+	} {
+		out := plainStatus(t, []stack.Row{r})
+		if strings.Contains(out, "✓") || !strings.Contains(out, "sifatul-stack update") {
+			t.Errorf("%s:\n%s", r.State, out)
+		}
+	}
+}
+
+func TestStackStatusOffAgentNeedsNoUpdate(t *testing.T) {
+	if out := plainStatus(t, []stack.Row{toggled("junior", false)}); strings.Contains(out, "sifatul-stack update") || !strings.Contains(out, "○ off") {
+		t.Errorf("status:\n%s", out)
+	}
+}
+
+func TestStackSummaryListsWrittenPrunedAndPluralConflicts(t *testing.T) {
+	out := plainSummary(t, []stack.Row{
+		row("skill", "a", "claude", stack.Linked, stack.DidLink),
+		row("skill", "a", "agents", stack.Linked, ""),
+		row("skill", "old", "claude", stack.Pruned, stack.DidPrune),
+		row("agent", "senior", "codex", stack.Written, stack.DidWrite),
+		{Kind: "skill", Name: "x", Harness: "claude", State: stack.Conflict, Detail: "one"},
+		{Kind: "skill", Name: "z", Harness: "claude", State: stack.Conflict, Detail: "two"},
+	})
+	for _, want := range []string{
+		"+ new  a (Claude Code)",
+		"− pruned  old",
+		"✓ 1 linked into Claude Code, ~/.agents",
+		"✓ 1 rendered for Codex",
+		"+ new  senior",
+		"! 2 conflicts, left alone",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary lacks %q:\n%s", want, out)
+		}
+	}
+}

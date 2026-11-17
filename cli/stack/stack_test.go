@@ -718,3 +718,35 @@ func TestRunRefusesAnUnknownHarness(t *testing.T) {
 		t.Error("an unknown harness removed OpenCode's agents")
 	}
 }
+
+func TestUnlinkLeavesForeignGlobalInstructionsAlone(t *testing.T) {
+	s := newSyncer(t, fixtureSource(t))
+	run(t, s, stack.Link)
+	for _, path := range []string{filepath.Join(s.Layout.Claude, "CLAUDE.md"), filepath.Join(s.Layout.Codex, "AGENTS.md")} {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		write(t, path, "hand written\n")
+	}
+
+	run(t, s, stack.Unlink)
+
+	for _, path := range []string{filepath.Join(s.Layout.Claude, "CLAUDE.md"), filepath.Join(s.Layout.Codex, "AGENTS.md")} {
+		if got := read(t, path); got != "hand written\n" {
+			t.Errorf("%s = %q", path, got)
+		}
+	}
+}
+
+func TestUnlinkLeavesForeignTierAgentAlone(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	foreign := filepath.Join(s.Layout.Claude, "agents", "associate.md")
+	write(t, foreign, "my own associate agent\n")
+	run(t, s, stack.Link)
+
+	run(t, s, stack.Unlink)
+
+	if read(t, foreign) != "my own associate agent\n" {
+		t.Error("unlink removed or changed a foreign agent at a tier path")
+	}
+}

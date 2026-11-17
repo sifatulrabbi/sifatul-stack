@@ -304,3 +304,27 @@ func TestTextViewStripsTerminalEscapesFromProviderStrings(t *testing.T) {
 		})
 	}
 }
+
+func TestCompactJSONIsUTCEvenWhenNowIsLocal(t *testing.T) {
+	reset := now.Add(time.Hour).In(dhaka)
+	var buf bytes.Buffer
+	if err := JSON(&buf, []usage.Report{{Provider: "claude", Windows: []usage.Window{{Name: "session", ResetsAt: &reset}}}}, now.In(dhaka)); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"fetched_at":"2026-11-16T10:00:00Z"`, `"resets_at":"2026-11-16T11:00:00Z"`} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %s in %s", want, buf.String())
+		}
+	}
+}
+
+func TestStaleReportWithoutAsOfHasNoAge(t *testing.T) {
+	r := usage.Report{Provider: "codex", Source: "rollout-cache", Stale: true}
+	if c := compact(r, now); !c.Stale || c.AgeS != nil {
+		t.Fatalf("compact = %+v", c)
+	}
+	var buf bytes.Buffer
+	if err := (TextView{}).Text(&buf, []usage.Report{r}, now); err != nil {
+		t.Fatal(err)
+	}
+}
