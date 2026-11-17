@@ -455,7 +455,7 @@ func (r *run) pruneAgents(h Harness, defs []agentDef) {
 		}
 		path := filepath.Join(dir, e.Name())
 		raw, err := os.ReadFile(path)
-		if err != nil || !managed(string(raw)) {
+		if err != nil || !managed(string(raw)) || !h.namesTier(string(raw), tier) {
 			continue
 		}
 		r.retire("agent", tier, h.Key, path, Orphaned)

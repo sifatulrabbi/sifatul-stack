@@ -829,3 +829,29 @@ func TestUnlinkIgnoresAnUnknownSavedHarness(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateKeepsUserCopyOfRenderedAgent(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	run(t, s, stack.Link)
+	copies := map[string]string{}
+	for from, to := range map[string]string{
+		filepath.Join(s.Layout.Claude, "agents", "senior.md"):  filepath.Join(s.Layout.Claude, "agents", "reviewer.md"),
+		filepath.Join(s.Layout.Codex, "agents", "senior.toml"): filepath.Join(s.Layout.Codex, "agents", "reviewer.toml"),
+	} {
+		copies[to] = read(t, from) + "my own edits\n"
+		write(t, to, copies[to])
+	}
+
+	for _, mode := range []stack.Mode{stack.Link, stack.Unlink} {
+		run(t, s, mode)
+		for path, want := range copies {
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("%s deleted the user's copy %s", mode, path)
+			}
+			if got := read(t, path); got != want {
+				t.Errorf("%s changed %s", mode, path)
+			}
+		}
+	}
+	assertMissing(t, filepath.Join(s.Layout.Claude, "agents", "senior.md"))
+}
