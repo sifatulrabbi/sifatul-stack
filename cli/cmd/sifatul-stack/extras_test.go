@@ -149,7 +149,7 @@ func TestInstallRefusesToWipeAnExtraCloneWithLocalWork(t *testing.T) {
 	if _, err := os.Stat(mine); err != nil {
 		t.Error("install deleted local work in the extra's clone")
 	}
-	if code == 0 || !strings.Contains(out, "local changes") {
+	if code == 0 || !strings.Contains(out, "push or discard") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 }

@@ -16,6 +16,7 @@ const DefaultURL = "https://github.com/sifatulrabbi/sifatul-stack"
 
 var (
 	ErrDirty        = errors.New("the clone has local changes; commit, stash, or discard them first")
+	ErrLocalWork    = errors.New("the clone holds local work that a re-clone would delete; push or discard it first")
 	ErrNotInstalled = errors.New("sifatul-stack is not installed; run `sifatul-stack install` first")
 )
 
@@ -141,12 +142,12 @@ func (r Repo) reclone(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	unpushed, err := r.git(ctx, "log", "--oneline", "--branches", "--not", "--remotes")
+	unpushed, err := r.git(ctx, "log", "--oneline", "--exclude=refs/tags/*", "--all", "--not", "--remotes")
 	if err != nil {
 		return err
 	}
 	if len(strings.TrimSpace(string(status)+string(unpushed))) > 0 {
-		return fmt.Errorf("%s must be re-cloned from %s: %w", r.Dir, r.URL, ErrDirty)
+		return fmt.Errorf("%s must be re-cloned from %s: %w", r.Dir, r.URL, ErrLocalWork)
 	}
 	return r.clone(ctx)
 }

@@ -440,11 +440,46 @@ func TestSyncRefusesToRecloneOverLocalWork(t *testing.T) {
 			git(t, "-C", r.Dir, "checkout", "--quiet", "-b", "mine")
 			work(r.Dir)
 
-			if _, err := r.Sync(ctx); !errors.Is(err, source.ErrDirty) {
-				t.Fatalf("err = %v, want ErrDirty", err)
+			if _, err := r.Sync(ctx); !errors.Is(err, source.ErrLocalWork) {
+				t.Fatalf("err = %v, want ErrLocalWork", err)
 			}
 			if _, err := os.Stat(filepath.Join(r.Dir, "mine.md")); err != nil {
 				t.Error("sync deleted local work")
+			}
+		})
+	}
+}
+
+func TestSyncRefusesToRecloneOverStashedOrDetachedWork(t *testing.T) {
+	for name, work := range map[string]func(dir string){
+		"stashed": func(dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "skills", "a", "SKILL.md"), []byte("mine\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			git(t, "-C", dir, "stash", "--quiet")
+		},
+		"detached commit": func(dir string) {
+			git(t, "-C", dir, "checkout", "--quiet", "--detach")
+			if err := os.WriteFile(filepath.Join(dir, "mine.md"), []byte("mine\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			git(t, "-C", dir, "add", "-A")
+			git(t, "-C", dir, "commit", "--quiet", "-m", "mine")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := newUpstream(t)
+			git(t, "-C", u.dir, "branch", "next")
+			r := repo(t, u)
+			ctx := context.Background()
+			if _, err := r.Sync(ctx); err != nil {
+				t.Fatal(err)
+			}
+			work(r.Dir)
+			r.Branch = "next"
+
+			if _, err := r.Sync(ctx); !errors.Is(err, source.ErrLocalWork) {
+				t.Fatalf("err = %v, want ErrLocalWork", err)
 			}
 		})
 	}
