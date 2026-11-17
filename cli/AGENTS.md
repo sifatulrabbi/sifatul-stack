@@ -1,6 +1,6 @@
 # sifatul-stack CLI
 
-Go CLI that installs and updates the stack (`stack/`, `source/`; see the root `AGENTS.md` for how installs work) and reports remaining Claude Code and Codex subscription quota for humans (table) and agents (`--json`). The usage layout, flags, sources, and JSON contract live in `README.md`; read it before changing `usage` behavior.
+Go CLI that installs the stack (`stack/`, `source/`; see the root `AGENTS.md` for how installs work) and reports remaining Claude Code and Codex subscription quota for humans (table) and agents (`--json`). The usage layout, flags, sources, and JSON contract live in `README.md`; read it before changing `usage` behavior.
 
 ## Workflow
 

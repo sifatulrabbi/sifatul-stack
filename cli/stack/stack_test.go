@@ -736,14 +736,14 @@ func TestSharedSkillsDirFollowsCodexOrOpenCode(t *testing.T) {
 	assertMissing(t, filepath.Join(s.Layout.Claude, "skills"))
 }
 
-func TestDeselectedHarnessIsRemovedOnLink(t *testing.T) {
+func TestDroppedHarnessIsRemovedOnLink(t *testing.T) {
 	s := newSyncer(t, repoRoot(t))
 	l := s.Layout
 	codexMD := filepath.Join(l.Codex, "AGENTS.md")
 	write(t, codexMD, "old codex global\n")
 	run(t, s, stack.Link)
 
-	s.Selected = []string{"claude", "opencode"}
+	s.Selected, s.Dropped = []string{"claude", "opencode"}, []string{"codex"}
 	r := run(t, s, stack.Link)
 
 	assertMissing(t, codexMD)
@@ -753,11 +753,39 @@ func TestDeselectedHarnessIsRemovedOnLink(t *testing.T) {
 		t.Errorf("codex senior change = %q, want removed", got)
 	}
 
-	s.Selected = []string{"claude"}
+	s.Selected, s.Dropped = []string{"claude"}, []string{"opencode"}
 	run(t, s, stack.Link)
 	assertMissing(t, filepath.Join(l.AgentsSkills, "full-review"))
 	assertMissing(t, filepath.Join(l.OpenCode, "agents", "senior.md"))
 	assertLinksTo(t, filepath.Join(l.Claude, "skills", "full-review"), filepath.Join(s.Source, "skills", "full-review"))
+}
+
+func TestLinkLeavesUnchosenHarnessesAlone(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	l := s.Layout
+	s.Owned = run(t, s, stack.Link).Agents
+	s.Selected = []string{"claude"}
+	mine := map[string]string{
+		filepath.Join(l.Codex, "agents", "senior.toml"):  "codex mine\n",
+		filepath.Join(l.Codex, "AGENTS.md"):              "codex global\n",
+		filepath.Join(l.OpenCode, "agents", "senior.md"): "opencode mine\n",
+	}
+	for path, text := range mine {
+		os.Remove(path)
+		write(t, path, text)
+	}
+
+	r := run(t, s, stack.Link)
+
+	for path, text := range mine {
+		if got := read(t, path); got != text {
+			t.Errorf("%s = %q, want %q", path, got, text)
+		}
+	}
+	assertLinksTo(t, filepath.Join(l.AgentsSkills, "full-review"), filepath.Join(s.Source, "skills", "full-review"))
+	if got := harnessesIn(r); !slices.Equal(got, []string{"claude"}) {
+		t.Errorf("rows cover %v, want only claude", got)
+	}
 }
 
 func TestStatusReportsOnlySelectedHarnesses(t *testing.T) {
@@ -775,16 +803,20 @@ func TestStatusReportsOnlySelectedHarnesses(t *testing.T) {
 	}
 }
 
-func TestUnlinkRemovesEveryHarnessWhateverTheSelection(t *testing.T) {
+func TestUnlinkTouchesOnlyChosenHarnesses(t *testing.T) {
 	s := newSyncer(t, repoRoot(t))
-	run(t, s, stack.Link)
+	s.Owned = run(t, s, stack.Link).Agents
 	s.Selected = []string{"claude"}
 
 	run(t, s, stack.Unlink)
 
-	assertMissing(t, filepath.Join(s.Layout.Codex, "agents", "senior.toml"))
-	assertMissing(t, filepath.Join(s.Layout.AgentsSkills, "full-review"))
+	assertMissing(t, filepath.Join(s.Layout.Claude, "agents", "senior.md"))
 	assertMissing(t, filepath.Join(s.Layout.Claude, "CLAUDE.md"))
+	assertMissing(t, filepath.Join(s.Layout.Claude, "skills", "full-review"))
+	if _, err := os.Stat(filepath.Join(s.Layout.Codex, "agents", "senior.toml")); err != nil {
+		t.Error("unlink touched codex, which was not chosen")
+	}
+	assertLinksTo(t, filepath.Join(s.Layout.AgentsSkills, "full-review"), filepath.Join(s.Source, "skills", "full-review"))
 }
 
 func TestParseHarnesses(t *testing.T) {

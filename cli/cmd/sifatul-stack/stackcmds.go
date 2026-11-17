@@ -65,11 +65,11 @@ func (e stackEnv) repo() source.Repo {
 	return source.Repo{Dir: filepath.Join(e.dataDir, "stack"), URL: e.repoURL, Git: e.git}
 }
 
-func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode stack.Mode) error {
+func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode stack.Mode, dropped ...string) error {
 	if err := ui.Interrupted(ctx); err != nil {
 		return err
 	}
-	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Selected: st.Harnesses, Owned: st.Agents}.Run(mode)
+	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Selected: st.Harnesses, Dropped: dropped, Owned: st.Agents}.Run(mode)
 	view := render.StackSummary
 	if mode == stack.Status {
 		view = render.StackStatus
@@ -95,14 +95,6 @@ func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode s
 	return nil
 }
 
-func (e stackEnv) loadState() (source.State, error) {
-	st, err := source.LoadState(e.statePath())
-	if err != nil {
-		return st, failed(err)
-	}
-	return st, nil
-}
-
 func checkout(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err == nil {
@@ -117,19 +109,19 @@ func checkout(dir string) (string, error) {
 	return abs, nil
 }
 
-func newSetupCmd(e stackEnv) *cobra.Command {
+func newInstallCmd(e stackEnv) *cobra.Command {
 	var from string
 	var harnesses []string
 	cmd := &cobra.Command{
-		Use:   "setup",
-		Short: "Install sifatul-stack: clone it, link skills and global instructions, render the sub-agents",
+		Use:   "install",
+		Short: "Pull the latest sifatul-stack and install it into the chosen harnesses; clean up the ones you drop",
 		Long: "Install sifatul-stack into Claude Code, Codex, and OpenCode, or the ones you choose.\n\n" +
-			"Clones sifatul-stack into the data dir (or uses --from), links skills and global instructions, and renders the named sub-agents. " +
-			"In a terminal, setup asks which harnesses to install into; --harness skips the question, and without either it keeps the last choice (all on a first setup). " +
-			"A harness you drop is cleaned up the same way `sifatul-stack remove` would. " +
+			"Every run pulls the latest sifatul-stack into the data dir (cloning it the first time), links skills and global instructions, and renders the named sub-agents. " +
+			"In a terminal, install asks which harnesses to install into; --harness skips the question, and without either it keeps the last choice (all on a first install). " +
+			"A harness you drop from the list is cleaned up: its links and sub-agent files are removed, and nothing is restored. A harness you never chose is never touched. " +
 			"Whatever already sits at a target path (a skill link, a global instructions file, a sub-agent file) is replaced without a backup. " +
-			"state.json records the sub-agents it rendered, so a later update or remove knows which agent files are its own.",
-		Example: "  sifatul-stack setup\n  sifatul-stack setup --harness claude,codex\n  sifatul-stack setup --from ~/projects/sifatul-stack",
+			"--from links your own checkout instead of the managed clone; install never pulls it.",
+		Example: "  sifatul-stack install\n  sifatul-stack install --harness claude,codex\n  sifatul-stack install --from ~/projects/sifatul-stack",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w := cmd.OutOrStdout()
@@ -144,8 +136,10 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 				return failed(err)
 			}
 			want.Harnesses = chosen
+			var dropped []string
 			if prevErr == nil {
 				want.Agents = prev.Agents
+				dropped = slices.DeleteFunc(stack.Chosen(prev.Harnesses), func(h string) bool { return slices.Contains(chosen, h) })
 			}
 			if prevErr == nil && prev.Source != want.Source {
 				e.note(w, ui.Warn.Render("•"), "switching from "+prev.Source)
@@ -156,10 +150,10 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 			if err := source.SaveState(e.statePath(), want); err != nil {
 				return failed(err)
 			}
-			return e.sync(cmd.Context(), w, want, stack.Link)
+			return e.sync(cmd.Context(), w, want, stack.Link, dropped...)
 		},
 	}
-	cmd.Flags().StringVar(&from, "from", "", "use this checkout of sifatul-stack instead of a managed clone (edits show up live)")
+	cmd.Flags().StringVar(&from, "from", "", "use this checkout of sifatul-stack instead of the managed clone; install links it and never pulls it")
 	cmd.Flags().StringSliceVar(&harnesses, "harness", nil, "install only into these harnesses: "+strings.Join(stack.Harnesses, ", ")+" (repeat or comma-separate)")
 	return cmd
 }
@@ -202,7 +196,7 @@ func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source
 	}
 	chosen, err := e.choose(cmd.Context(), choices)
 	if errors.Is(err, ui.ErrCanceled) {
-		return nil, failed(errors.New("setup canceled; nothing changed"))
+		return nil, failed(errors.New("install canceled; nothing changed"))
 	}
 	if err != nil {
 		return nil, failed(err)
@@ -216,7 +210,7 @@ func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, 
 		if err != nil {
 			return source.State{}, err
 		}
-		e.note(cmd.OutOrStdout(), ui.OK.Render("✓"), "using your checkout at "+dir)
+		e.note(cmd.OutOrStdout(), ui.Warn.Render("•"), "using your checkout at "+dir+"; pull it yourself")
 		return source.State{Source: dir}, nil
 	}
 	repo := e.repo()
@@ -227,8 +221,15 @@ func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, 
 			return "", err
 		case cloned:
 			return "cloned " + repo.URL + " into " + repo.Dir, nil
+		}
+		change, err := repo.Pull(ctx)
+		switch {
+		case err != nil:
+			return "", err
+		case change.Updated():
+			return "updated " + change.From + " → " + change.To, nil
 		default:
-			return "using the clone at " + repo.Dir, nil
+			return "already up to date at " + change.To, nil
 		}
 	})
 	if err != nil {
@@ -241,40 +242,6 @@ func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, 
 	return source.State{Source: dir, Managed: true}, nil
 }
 
-func newUpdateCmd(e stackEnv) *cobra.Command {
-	return &cobra.Command{
-		Use:   "update",
-		Short: "Pull the latest sifatul-stack and re-sync skills, instructions, and sub-agents",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			w := cmd.OutOrStdout()
-			st, err := e.loadState()
-			if err != nil {
-				return err
-			}
-			if st.Managed {
-				err := e.step(cmd, func(ctx context.Context) (string, error) {
-					change, err := source.Repo{Dir: st.Source, Git: e.git}.Pull(ctx)
-					switch {
-					case err != nil:
-						return "", err
-					case change.Updated():
-						return "updated " + change.From + " → " + change.To, nil
-					default:
-						return "already up to date at " + change.To, nil
-					}
-				})
-				if err != nil {
-					return failed(err)
-				}
-			} else {
-				e.note(w, ui.Warn.Render("•"), st.Source+" is your checkout; pull it yourself")
-			}
-			return e.sync(cmd.Context(), w, st, stack.Link)
-		},
-	}
-}
-
 func newStatusCmd(e stackEnv) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
@@ -283,8 +250,8 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w := cmd.OutOrStdout()
 			st, err := source.LoadState(e.statePath())
-			if errors.Is(err, source.ErrNotSetUp) {
-				e.note(w, ui.Warn.Render("•"), "not set up; run `sifatul-stack setup`")
+			if errors.Is(err, source.ErrNotInstalled) {
+				e.note(w, ui.Warn.Render("•"), "not installed; run `sifatul-stack install`")
 				return nil
 			}
 			if err != nil {
@@ -300,31 +267,6 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 				{ui.Accent.Render("Harnesses"), labels(chosen)},
 			}, "  ")+"\n")
 			return e.sync(cmd.Context(), w, st, stack.Status)
-		},
-	}
-}
-
-func newRemoveCmd(e stackEnv) *cobra.Command {
-	return &cobra.Command{
-		Use:   "remove",
-		Short: "Remove the links and sub-agent files setup created; nothing is restored",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			w := cmd.OutOrStdout()
-			st, err := e.loadState()
-			if err != nil {
-				return err
-			}
-			if err := e.sync(cmd.Context(), w, st, stack.Unlink); err != nil {
-				return err
-			}
-			if err := os.Remove(e.statePath()); err != nil {
-				return failed(err)
-			}
-			if st.Managed {
-				e.note(w, ui.OK.Render("✓"), "removed; the clone at "+st.Source+" stays for the next setup")
-			}
-			return nil
 		},
 	}
 }

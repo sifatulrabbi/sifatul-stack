@@ -15,8 +15,8 @@ import (
 const DefaultURL = "https://github.com/sifatulrabbi/sifatul-stack"
 
 var (
-	ErrDirty    = errors.New("the sifatul-stack clone has local changes; commit, stash, or discard them first")
-	ErrNotSetUp = errors.New("sifatul-stack is not set up; run `sifatul-stack setup` first")
+	ErrDirty        = errors.New("the sifatul-stack clone has local changes; commit, stash, or discard them first")
+	ErrNotInstalled = errors.New("sifatul-stack is not installed; run `sifatul-stack install` first")
 )
 
 const gitGrace = 5 * time.Second
@@ -52,7 +52,7 @@ func (r Repo) Ensure(ctx context.Context) (cloned bool, err error) {
 		return false, fmt.Errorf("%s exists but is not a git clone: %w", r.Dir, err)
 	}
 	if _, err := r.git(ctx, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
-		return false, fmt.Errorf("%s has nothing checked out, likely from an interrupted clone; delete %s and rerun setup", r.Dir, r.Dir)
+		return false, fmt.Errorf("%s has nothing checked out, likely from an interrupted clone; delete %s and rerun install", r.Dir, r.Dir)
 	}
 	return false, nil
 }
@@ -117,7 +117,7 @@ type State struct {
 func LoadState(path string) (State, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return State{}, ErrNotSetUp
+		return State{}, ErrNotInstalled
 	}
 	if err != nil {
 		return State{}, err

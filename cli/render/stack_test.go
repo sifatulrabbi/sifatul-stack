@@ -98,7 +98,7 @@ func TestStackStatusIsAMatrixWithAFixHint(t *testing.T) {
 		"\n\nSub-agents   Claude Code   OpenCode",
 		"  senior     ~ stale       ✓ on",
 		"  junior                   ○ off",
-		"run `sifatul-stack update`",
+		"run `sifatul-stack install`",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status lacks %q:\n%s", want, out)
@@ -109,7 +109,7 @@ func TestStackStatusIsAMatrixWithAFixHint(t *testing.T) {
 func TestStackStatusWithEverythingInPlaceHasNoHint(t *testing.T) {
 	var buf bytes.Buffer
 	ui.Print(&buf, StackStatus([]stack.Row{row("skill", "tdd", "claude", "linked", "")}))
-	if strings.Contains(buf.String(), "sifatul-stack update") {
+	if strings.Contains(buf.String(), "sifatul-stack install") {
 		t.Errorf("status:\n%s", buf.String())
 	}
 }
@@ -150,7 +150,7 @@ func TestStackStatusFlagsFailuresWithoutAnUpdateHint(t *testing.T) {
 			t.Errorf("status lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "✓ failed") || strings.Contains(out, "sifatul-stack update") {
+	if strings.Contains(out, "✓ failed") || strings.Contains(out, "sifatul-stack install") {
 		t.Errorf("status:\n%s", out)
 	}
 }
@@ -161,14 +161,14 @@ func TestStackStatusAsksForUpdateOnOrphansAndPathsToReplace(t *testing.T) {
 		{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.Stale, Detail: "/h/.claude/CLAUDE.md"},
 	} {
 		out := plainStatus(t, []stack.Row{r})
-		if strings.Contains(out, "✓") || !strings.Contains(out, "sifatul-stack update") {
+		if strings.Contains(out, "✓") || !strings.Contains(out, "sifatul-stack install") {
 			t.Errorf("%s:\n%s", r.State, out)
 		}
 	}
 }
 
 func TestStackStatusOffAgentNeedsNoUpdate(t *testing.T) {
-	if out := plainStatus(t, []stack.Row{toggled("junior", false)}); strings.Contains(out, "sifatul-stack update") || !strings.Contains(out, "○ off") {
+	if out := plainStatus(t, []stack.Row{toggled("junior", false)}); strings.Contains(out, "sifatul-stack install") || !strings.Contains(out, "○ off") {
 		t.Errorf("status:\n%s", out)
 	}
 }
