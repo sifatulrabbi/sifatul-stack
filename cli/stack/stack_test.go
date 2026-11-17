@@ -371,6 +371,32 @@ func TestPruneLeavesForeignFilesAlone(t *testing.T) {
 	}
 }
 
+func TestPruneLeavesLinksIntoASiblingCheckoutAlone(t *testing.T) {
+	src := fixtureSource(t, "keep")
+	s := newSyncer(t, src)
+	skills := filepath.Join(s.Layout.Claude, "skills")
+	foreign := map[string]string{
+		"mine": filepath.Join(src+"-dev", "skills", "mine"),
+		"x":    filepath.Join(src, "skills-extra", "x"),
+	}
+	for name, target := range foreign {
+		write(t, filepath.Join(target, "SKILL.md"), name+"\n")
+		if err := os.MkdirAll(skills, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(skills, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, mode := range []stack.Mode{stack.Link, stack.Unlink} {
+		run(t, s, mode)
+		for name, target := range foreign {
+			assertLinksTo(t, filepath.Join(skills, name), target)
+		}
+	}
+}
+
 func TestRejectsAgentTextThatBreaksQuoting(t *testing.T) {
 	for name, edit := range map[string]func(string) string{
 		"double quote": func(s string) string { return strings.Replace(s, "description: ", `description: a "quoted" `, 1) },
