@@ -15,6 +15,7 @@ Application logic unrelated to stored data, security, style.
 3. Deploy ordering: can old code run against the new schema, and new code against the old one, during rollout?
 4. Backfills: batched, idempotent, resumable? What about rows written while it runs?
 5. Do existing rows violate new constraints or defaults?
+6. For every renamed or dropped table, column, or key, find each place still holding the old name or id: queries, ORM models, other tables' foreign keys and stored references, caches, jobs, and other services.
 
 When table size matters and isn't known, state your assumption in the finding.
 

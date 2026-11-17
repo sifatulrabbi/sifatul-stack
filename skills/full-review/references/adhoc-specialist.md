@@ -1,6 +1,6 @@
 # Ad-hoc specialist template
 
-Use when the risk map shows a concern no specialist covers. Copy this to `RUN_DIR/jobs/<job>-role.md`, fill it in from the risk map, and point the job file's `Role` at it. Keep it short.
+Use when the risk map shows a concern no specialist covers. Copy this to `ROUND_DIR/jobs/<job>-role.md`, fill it in from the risk map, and point the job file's `Role` at it. Keep it short.
 
 ```markdown
 # <Name>

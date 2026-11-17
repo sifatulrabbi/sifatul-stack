@@ -1,29 +1,55 @@
 #!/usr/bin/env bash
-# Create the run directory and a read-only review worktree at the head commit.
-# Usage (from the repo root): init_run.sh <run-id> <head-ref>
-# Prints RUN_DIR, REVIEW_TREE and WORKTREE_BASE as KEY=VALUE lines.
 set -euo pipefail
 
-run_id="${1:?usage: init_run.sh <run-id> <head-ref>}"
-head="${2:?usage: init_run.sh <run-id> <head-ref>}"
+usage="usage: init_run.sh <target: pr<n> or branch> <head-ref>"
+target="${1:?$usage}"
+target="${target//\//-}"
+head="$(git rev-parse --verify "${2:?$usage}^{commit}")"
 
 root="$(git rev-parse --show-toplevel)"
 repo="$(basename "$root")"
 
 if [ -d "$root/.planning" ]; then
-  run_dir="$root/.planning/full-review/$run_id"
+  target_dir="$root/.planning/full-review/$target"
 else
-  run_dir="/tmp/full-review/$repo/$run_id"
+  target_dir="/tmp/full-review/$repo/$target"
 fi
-mkdir -p "$run_dir/jobs" "$run_dir/notes" "$run_dir/findings" "$run_dir/verified"
+mkdir -p "$target_dir"
 
-wt_base="/tmp/full-review-worktrees/$repo/$run_id"
+last=0
+prev=""
+for dir in "$target_dir"/round-*/; do
+  [ -d "$dir" ] || continue
+  n="${dir%/}"
+  n="${n##*/round-}"
+  [ "$n" -gt "$last" ] && last="$n"
+done
+for ((n = last; n >= 1; n--)); do
+  if [ -f "$target_dir/round-$n/review.md" ]; then
+    prev="$target_dir/round-$n"
+    break
+  fi
+done
+
+round=$((last + 1))
+if [ "$last" -gt 0 ] && [ ! -f "$target_dir/round-$last/review.md" ] &&
+  grep -qx "head: $head" "$target_dir/round-$last/round.md" 2>/dev/null; then
+  round="$last"
+fi
+
+round_dir="$target_dir/round-$round"
+mkdir -p "$round_dir/jobs" "$round_dir/notes" "$round_dir/findings" "$round_dir/verified"
+[ -f "$round_dir/round.md" ] || printf -- '---\nhead: %s\n---\n' "$head" >"$round_dir/round.md"
+
+wt_base="/tmp/full-review-worktrees/$repo/$target/round-$round"
 review_tree="$wt_base/review"
 if [ ! -d "$review_tree" ]; then
   mkdir -p "$wt_base"
   git worktree add --detach "$review_tree" "$head" >/dev/null 2>&1
 fi
 
-echo "RUN_DIR=$run_dir"
+echo "ROUND=$round"
+echo "ROUND_DIR=$round_dir"
+echo "PREV_ROUND_DIR=$prev"
 echo "REVIEW_TREE=$review_tree"
 echo "WORKTREE_BASE=$wt_base"

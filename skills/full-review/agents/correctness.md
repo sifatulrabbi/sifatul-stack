@@ -16,6 +16,7 @@ Security, performance, style, test coverage, public API compatibility, and concu
 2. Trace each changed path with realistic inputs: normal, empty, boundary, error.
 3. For every changed signature, return value, or thrown error, check each internal caller (see your context file) still works.
 4. Check error paths: swallowed errors, partial writes, missing cleanup on failure.
+5. For every renamed, moved, or deleted id, key, enum value, or symbol, find each place still holding the old one: callers, stores, caches, config, serialized data.
 
 ## Not a finding
 

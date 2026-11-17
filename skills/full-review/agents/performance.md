@@ -14,7 +14,7 @@ Logic bugs, security, style, tests.
 2. For hot code, count queries, network calls, and allocations per invocation as a function of input size.
 3. Estimate realistic sizes from the codebase (pagination limits, batch sizes, fixtures) and state them.
 
-Write the `trigger` with the input size and the resulting cost.
+Write the `## Trigger` with the input size and the resulting cost.
 
 ## Not a finding
 

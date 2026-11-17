@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Label each diff hunk as mechanical or semantic so only real changes get reviewed.
 
-Usage: classify_hunks.py --base <ref> [--head <ref>] [-o hunks.json]
+Usage: classify_hunks.py --base <ref> [--head <ref>] [-o hunks.md]
 
 Kinds: whitespace, comment, lockfile, generated, rename, docs, binary, semantic.
 These are heuristics; the lead skims non-semantic hunks before excluding them.
@@ -9,7 +9,6 @@ These are heuristics; the lead skims non-semantic hunks before excluding them.
 
 import argparse
 import fnmatch
-import json
 import re
 import subprocess
 import sys
@@ -75,6 +74,7 @@ def parse(diff):
                 "status": "modified",
                 "binary": False,
                 "similarity": None,
+                "old_path": None,
                 "hunks": [],
             }
             files.append(cur)
@@ -95,6 +95,8 @@ def parse(diff):
                 cur["status"] = "added"
             elif line.startswith("deleted file mode"):
                 cur["status"] = "deleted"
+            elif line.startswith("rename from "):
+                cur["old_path"] = line[12:]
             elif line.startswith("rename to "):
                 cur["status"], cur["path"] = "renamed", line[10:]
             elif line.startswith("similarity index "):
@@ -151,8 +153,53 @@ def hunk_kind(h):
     return "semantic"
 
 
+FILE_KINDS = ("lockfile", "generated", "docs", "binary", "rename")
+
+
+def span(h):
+    if h["new"][1] == 0:
+        start, count = h["old"]
+        where = f"removed {start}-{start + count - 1}" if count > 1 else f"removed {start}"
+    else:
+        start, count = h["new"]
+        where = f"{start}-{start + count - 1}" if count > 1 else f"{start}"
+    return f"{where} · {h['lines']}"
+
+
+def spans(hunks):
+    return ", ".join(span(h) for h in hunks)
+
+
+def render(base, head, files, by_kind, semantic_files, sem_lines):
+    out = ["---", f"base: {base}", f"head: {head}", f"files: {len(files)}"]
+    out += [f"semantic_files: {semantic_files}", f"semantic_lines: {sem_lines}"]
+    out += [f"{k}: {n}" for k, n in sorted(by_kind.items())]
+    out += ["---", "", "# Hunks", "", "## Semantic", ""]
+    out += ["| File | Status | Hunks (head lines · changed lines) |", "| --- | --- | --- |"]
+    for f in files:
+        sem = [h for h in f["hunks"] if h["kind"] == "semantic"]
+        if not sem and (f["hunks"] or f["kind"] != "semantic"):
+            continue
+        status = f"renamed from {f['old_path']}" if f["status"] == "renamed" else f["status"]
+        out.append(f"| {f['path']} | {status} | {spans(sem) or 'no content hunks'} |")
+    out += ["", "## Mechanical (skim before excluding)"]
+    kinds = sorted(({h["kind"] for f in files for h in f["hunks"]} | {f["kind"] for f in files}) - {"semantic", "mixed"})
+    for kind in kinds:
+        out += ["", f"### {kind}", ""]
+        for f in files:
+            if kind == "rename" and f["kind"] == "rename":
+                out.append(f"- {f['old_path']} → {f['path']}")
+            elif kind in FILE_KINDS and f["kind"] == kind:
+                out.append(f"- {f['path']} · {sum(h['lines'] for h in f['hunks'])} lines")
+            elif kind not in FILE_KINDS:
+                own = [h for h in f["hunks"] if h["kind"] == kind]
+                if own:
+                    out.append(f"- {f['path']}: {spans(own)}")
+    return "\n".join(out) + "\n"
+
+
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description="Label each diff hunk as mechanical or semantic.")
     ap.add_argument("--base", required=True)
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("-o", "--output")
@@ -173,51 +220,37 @@ def main():
         for h in f["hunks"]:
             kind = fk or hunk_kind(h)
             changed = len(h["added"]) + len(h["removed"])
-            hunks.append(
-                {"old": h["old"], "new": h["new"], "kind": kind, "lines": changed}
-            )
+            hunks.append({"old": h["old"], "new": h["new"], "kind": kind, "lines": changed})
             by_kind[kind] = by_kind.get(kind, 0) + 1
             if kind == "semantic":
                 sem_lines += changed
-        if not hunks:  # pure renames, binaries, empty files
+        if not hunks:
             by_kind[fk or "semantic"] = by_kind.get(fk or "semantic", 0) + 1
         kinds = {h["kind"] for h in hunks} or {fk or "semantic"}
         out_files.append(
             {
                 "path": f["path"],
+                "old_path": f["old_path"],
                 "status": f["status"],
                 "kind": kinds.pop() if len(kinds) == 1 else "mixed",
                 "hunks": hunks,
             }
         )
 
-    semantic_files = [
-        f["path"]
+    semantic_files = sum(
+        1
         for f in out_files
-        if f["kind"] in ("semantic", "mixed")
-        and (any(h["kind"] == "semantic" for h in f["hunks"]) or not f["hunks"])
-    ]
-    result = {
-        "base": args.base,
-        "head": args.head,
-        "summary": {
-            "files": len(out_files),
-            "semantic_files": len(semantic_files),
-            "semantic_lines": sem_lines,
-            "hunks_by_kind": by_kind,
-        },
-        "files": out_files,
-    }
-    text = json.dumps(result, indent=2)
+        if any(h["kind"] == "semantic" for h in f["hunks"]) or (not f["hunks"] and f["kind"] == "semantic")
+    )
+    text = render(args.base, args.head, out_files, by_kind, semantic_files, sem_lines)
     if args.output:
         with open(args.output, "w") as fh:
             fh.write(text)
     else:
-        print(text)
-    s = result["summary"]
+        print(text, end="")
     print(
-        f"{s['files']} files, {s['semantic_files']} with semantic changes, "
-        f"{s['semantic_lines']} semantic lines. Hunks by kind: {by_kind}",
+        f"{len(out_files)} files, {semantic_files} with semantic changes, "
+        f"{sem_lines} semantic lines. Hunks by kind: {by_kind}",
         file=sys.stderr,
     )
 

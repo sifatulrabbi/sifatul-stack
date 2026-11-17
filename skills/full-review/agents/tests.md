@@ -11,9 +11,9 @@ Bugs in the production code itself, style, coverage percentages.
 ## How to work
 
 1. List the behavior changes from the brief. For each, find the test that would fail if it broke. No such test is a candidate gap.
-2. For each gap, name the missing test as a concrete case: the input or state, the expected outcome, and what it guards against (a regression of this change, an edge case, misbehavior on bad input or failure). Put the case in `suggested_fix`. In `trigger`, name the mutation that proves the gap: the smallest break to the production code that the suite should catch but doesn't.
+2. For each gap, name the missing test as a concrete case: the input or state, the expected outcome, and what it guards against (a regression of this change, an edge case, misbehavior on bad input or failure). Put the case under `## Fix`. Under `## Trigger`, name the mutation that proves the gap: the smallest break to the production code that the suite should catch but doesn't.
 3. Read new and changed tests: do assertions check the outcome, or only that something ran? Do mocks replace the code under test? For changed tests, check whether an assertion was loosened or removed to make it pass.
-4. Look for tests that don't earn their keep: a test that still passes when the code it covers is broken, a test that duplicates another one's case, a test pinned to implementation details that breaks on a harmless refactor, and a test of framework or trivial code. In `trigger`, name the mutation or refactor that shows it; in `suggested_fix`, say delete it or assert the outcome instead.
+4. Look for tests that don't earn their keep: a test that still passes when the code it covers is broken, a test that duplicates another one's case, a test pinned to implementation details that breaks on a harmless refactor, and a test of framework or trivial code. Under `## Trigger`, name the mutation or refactor that shows it; under `## Fix`, say delete it or assert the outcome instead.
 
 ## Not a finding
 
