@@ -41,7 +41,7 @@ func (p Provider) Usage(ctx context.Context) (usage.Report, error) {
 		fbCtx := ctx
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			var cancel context.CancelFunc
-			fbCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), FallbackBudget)
+			fbCtx, cancel = context.WithTimeout(usage.PastLiveTimeout(ctx), FallbackBudget)
 			defer cancel()
 		}
 		var fbErr error

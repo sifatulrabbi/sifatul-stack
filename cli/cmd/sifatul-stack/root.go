@@ -92,7 +92,7 @@ func newUsageCmd(a app) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			selected := selectProviders(a.providers, args)
-			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+			ctx, cancel := usage.WithLiveTimeout(cmd.Context(), timeout)
 			defer cancel()
 			var reports []usage.Report
 			if asJSON {
@@ -100,7 +100,7 @@ func newUsageCmd(a app) *cobra.Command {
 			} else {
 				reports = a.fetchWithProgress(ctx, cmd.OutOrStdout(), selected)
 			}
-			if err := ui.Interrupted(ctx); err != nil {
+			if err := ui.Interrupted(cmd.Context()); err != nil {
 				return err
 			}
 

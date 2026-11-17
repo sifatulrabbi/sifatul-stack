@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sifatulrabbi/sifatul-stack/cli/codex"
 	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
@@ -209,5 +210,39 @@ func TestFinishTreatsAnInterruptAsQuiet130(t *testing.T) {
 	var buf bytes.Buffer
 	if code := finish(&buf, failed(fmt.Errorf("git clone: %w", ui.ErrInterrupted))); code != 130 || buf.Len() != 0 {
 		t.Fatalf("code = %d, out = %q", code, buf.String())
+	}
+}
+
+type hangingSnapshots struct{ entered chan struct{} }
+
+func (h hangingSnapshots) Read(ctx context.Context) (codex.Reading, error) {
+	if h.entered != nil {
+		close(h.entered)
+	}
+	<-ctx.Done()
+	return codex.Reading{}, ctx.Err()
+}
+
+func TestInterruptDuringTheCodexFallbackStopsUsage(t *testing.T) {
+	for _, args := range [][]string{{"--json"}, nil} {
+		fallback := hangingSnapshots{entered: make(chan struct{})}
+		p := codex.Provider{Live: hangingSnapshots{}, Fallback: fallback}
+		ctx, interrupt := context.WithCancelCause(context.Background())
+		go func() {
+			<-fallback.entered
+			interrupt(ui.ErrInterrupted)
+		}()
+		cmd := newUsageCmd(app{providers: []usage.Provider{p}, now: fixedNow})
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(append(args, "--timeout", "50ms"))
+
+		start := time.Now()
+		code := finish(&out, cmd.ExecuteContext(ctx))
+
+		if took := time.Since(start); code != 130 || out.Len() != 0 || took > time.Second {
+			t.Fatalf("%v: code = %d after %s, out = %q", args, code, took, out.String())
+		}
 	}
 }

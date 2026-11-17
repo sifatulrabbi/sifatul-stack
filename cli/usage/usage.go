@@ -56,6 +56,19 @@ type Provider interface {
 	Usage(ctx context.Context) (Report, error)
 }
 
+type outerKey struct{}
+
+func WithLiveTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithValue(ctx, outerKey{}, ctx), timeout)
+}
+
+func PastLiveTimeout(ctx context.Context) context.Context {
+	if outer, ok := ctx.Value(outerKey{}).(context.Context); ok {
+		return outer
+	}
+	return context.WithoutCancel(ctx)
+}
+
 func Fetch(ctx context.Context, p Provider) Report {
 	r, err := p.Usage(ctx)
 	if err != nil {
