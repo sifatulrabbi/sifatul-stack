@@ -3,6 +3,7 @@ package source_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -247,7 +248,7 @@ func TestExecGitLetsGitCleanUpWhenCanceled(t *testing.T) {
 	}
 }
 
-func TestPullRefusesADivergedCloneAndKeepsLocalCommits(t *testing.T) {
+func TestPullRefusesADivergedCloneEvenWithPullRebaseSet(t *testing.T) {
 	u := newUpstream(t)
 	r := repo(t, u)
 	ctx := context.Background()
@@ -261,6 +262,11 @@ func TestPullRefusesADivergedCloneAndKeepsLocalCommits(t *testing.T) {
 	git(t, "-C", r.Dir, "commit", "--quiet", "-m", "local")
 	before := git(t, "-C", r.Dir, "rev-parse", "HEAD")
 	u.commit("skills/b/SKILL.md", "b\n")
+	for i, kv := range [][2]string{{"pull.rebase", "true"}, {"user.name", "test"}, {"user.email", "test@example.com"}} {
+		t.Setenv(fmt.Sprintf("GIT_CONFIG_KEY_%d", i), kv[0])
+		t.Setenv(fmt.Sprintf("GIT_CONFIG_VALUE_%d", i), kv[1])
+	}
+	t.Setenv("GIT_CONFIG_COUNT", "3")
 
 	if _, err := r.Pull(ctx); err == nil {
 		t.Fatal("pull accepted a diverged clone")
