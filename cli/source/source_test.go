@@ -151,3 +151,33 @@ func TestStateFromBeforeHarnessChoiceLoadsWithNoSelection(t *testing.T) {
 		t.Fatalf("state = %+v %v; an old state should mean every harness", got, err)
 	}
 }
+
+func TestSaveStateNeverExposesAPartialFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	st := source.State{Source: "/x/stack", Managed: true, Harnesses: []string{"claude", "codex", "opencode"}}
+	if err := source.SaveState(path, st); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 200 {
+			if err := source.SaveState(path, st); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	defer func() { <-done }()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		if _, err := source.LoadState(path); err != nil {
+			t.Errorf("a reader saw a half-written state: %v", err)
+			return
+		}
+	}
+}
