@@ -24,6 +24,8 @@ type Extra struct {
 	Skills []string `json:"skills"`
 }
 
+func (x Extra) Dir(extrasDir string) string { return filepath.Join(extrasDir, x.Name) }
+
 var (
 	extraName  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	skillName  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -96,7 +98,7 @@ func (s Syncer) skillLinks() ([]skillLink, error) {
 		owner[n] = fromStack
 	}
 	for _, e := range s.Extras {
-		dir := filepath.Join(s.ExtrasDir, e.Name)
+		dir := e.Dir(s.ExtrasDir)
 		found, ferr := findSkills(dir)
 		for _, n := range e.Skills {
 			l := skillLink{name: n}

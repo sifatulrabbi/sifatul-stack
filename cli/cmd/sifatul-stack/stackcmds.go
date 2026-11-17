@@ -68,7 +68,7 @@ func (e stackEnv) repo() source.Repo {
 func (e stackEnv) extrasDir() string { return filepath.Join(e.dataDir, "extras") }
 
 func (e stackEnv) extraRepo(x stack.Extra) source.Repo {
-	return source.Repo{Dir: filepath.Join(e.extrasDir(), x.Name), URL: x.Repo, Branch: x.Branch, Git: e.git}
+	return source.Repo{Dir: x.Dir(e.extrasDir()), URL: x.Repo, Branch: x.Branch, Git: e.git}
 }
 
 func pickExtras(manifest []stack.Extra, names []string) []stack.Extra {
@@ -193,7 +193,7 @@ func newInstallCmd(e stackEnv) *cobra.Command {
 			}
 			err = e.sync(cmd.Context(), w, want, stack.Link, dropped...)
 			if err == nil || errors.Is(err, errFailed) {
-				if rerr := e.removeClonesExcept(want.Extras); rerr != nil {
+				if rerr := e.removeClonesExcept(picked); rerr != nil {
 					return failed(rerr)
 				}
 			}
@@ -314,7 +314,7 @@ func (e stackEnv) fetchExtras(cmd *cobra.Command, extras []stack.Extra) error {
 	return nil
 }
 
-func (e stackEnv) removeClonesExcept(keep []string) error {
+func (e stackEnv) removeClonesExcept(keep []stack.Extra) error {
 	entries, err := os.ReadDir(e.extrasDir())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -322,9 +322,14 @@ func (e stackEnv) removeClonesExcept(keep []string) error {
 	if err != nil {
 		return err
 	}
+	kept := make([]string, len(keep))
+	for i, x := range keep {
+		kept[i] = x.Dir(e.extrasDir())
+	}
 	for _, d := range entries {
-		if !slices.Contains(keep, d.Name()) {
-			if err := os.RemoveAll(filepath.Join(e.extrasDir(), d.Name())); err != nil {
+		dir := filepath.Join(e.extrasDir(), d.Name())
+		if !slices.Contains(kept, dir) {
+			if err := os.RemoveAll(dir); err != nil {
 				return err
 			}
 		}
