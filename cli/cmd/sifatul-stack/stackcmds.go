@@ -136,7 +136,7 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 			want.Harnesses = chosen
 			if prevErr == nil && prev.Source != want.Source {
 				e.note(w, ui.Warn.Render("•"), "switching from "+prev.Source)
-				if err := e.sync(w, prev, stack.Unlink); err != nil {
+				if err := e.sync(w, prev, stack.Detach); err != nil {
 					return err
 				}
 			}

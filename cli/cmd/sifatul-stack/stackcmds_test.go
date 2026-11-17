@@ -435,3 +435,19 @@ func TestRemoveAndSetupSurviveAMovedCheckout(t *testing.T) {
 		})
 	}
 }
+
+func TestSwitchingSourcesKeepsOpenCodeChoices(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup", "--from", f.upstream)
+	senior := filepath.Join(f.env.layout.OpenCode, "agents", "senior.md")
+	writeFile(t, senior, strings.Replace(readFile(t, senior), "disabled: true\n", "", 1))
+
+	f.mustRun("setup")
+
+	if strings.Contains(readFile(t, senior), "disabled: true\n") {
+		t.Error("switching sources switched senior back off in OpenCode")
+	}
+	if !strings.Contains(readFile(t, filepath.Join(f.env.layout.OpenCode, "agents", "junior.md")), "disabled: true\n") {
+		t.Error("switching sources switched junior on in OpenCode")
+	}
+}

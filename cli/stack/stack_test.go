@@ -621,3 +621,21 @@ func TestUnlinkWorksAfterTheSourceIsGone(t *testing.T) {
 		assertMissing(t, p)
 	}
 }
+
+func TestOpenCodeChoiceSurvivesDetachThenLink(t *testing.T) {
+	s := newSyncer(t, fixtureSource(t, "keep"))
+	run(t, s, stack.Link)
+	senior := filepath.Join(s.Layout.OpenCode, "agents", "senior.md")
+	write(t, senior, strings.Replace(read(t, senior), "disabled: true\n", "", 1))
+
+	run(t, s, stack.Detach)
+	assertMissing(t, filepath.Join(s.Layout.Claude, "skills", "keep"))
+	assertMissing(t, filepath.Join(s.Layout.Codex, "AGENTS.md"))
+	s.Source = fixtureSource(t, "keep")
+	run(t, s, stack.Link)
+
+	if hasLine(read(t, senior), "disabled: true") {
+		t.Error("senior was switched back off after a source switch")
+	}
+	assertLinksTo(t, filepath.Join(s.Layout.Claude, "skills", "keep"), filepath.Join(s.Source, "skills", "keep"))
+}

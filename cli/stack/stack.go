@@ -19,7 +19,10 @@ const (
 	Link   Mode = "link"
 	Unlink Mode = "unlink"
 	Status Mode = "status"
+	Detach Mode = "detach"
 )
+
+func (m Mode) releases() bool { return m == Unlink || m == Detach }
 
 type Layout struct {
 	Claude       string
@@ -96,7 +99,7 @@ func (s Syncer) selected(harness string) bool {
 
 func (r *run) on(harnesses ...string) *run {
 	switch {
-	case r.mode == Unlink || slices.ContainsFunc(harnesses, r.selected):
+	case r.mode.releases() || slices.ContainsFunc(harnesses, r.selected):
 		return r
 	case r.mode == Link:
 		return &run{Syncer: r.Syncer, mode: Unlink, report: r.report}
@@ -108,7 +111,7 @@ func (r *run) on(harnesses ...string) *run {
 func (s Syncer) Run(mode Mode) (Report, error) {
 	var defs []agentDef
 	var skills []string
-	if mode != Unlink {
+	if !mode.releases() {
 		var err error
 		if defs, err = loadAgents(s.Source); err != nil {
 			return Report{}, err
@@ -131,7 +134,7 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 		if x == nil {
 			continue
 		}
-		if x.mode != Unlink {
+		if !x.mode.releases() {
 			for _, name := range skills {
 				x.linkPath("skill", name, t.harness, filepath.Join(s.Source, "skills", name), filepath.Join(t.dir, name))
 			}
@@ -147,7 +150,7 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 
 	for _, d := range defs {
 		for _, h := range Harnesses {
-			if x := r.on(h); x != nil && x.mode != Unlink {
+			if x := r.on(h); x != nil && !x.mode.releases() {
 				if err := x.syncAgent(d, h); err != nil {
 					return *r.report, err
 				}
@@ -155,7 +158,7 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 		}
 	}
 	for _, h := range Harnesses {
-		if x := r.on(h); x != nil {
+		if x := r.on(h); x != nil && x.mode != Detach {
 			x.pruneAgents(h, defs)
 		}
 	}
@@ -207,7 +210,7 @@ func exists(path string) bool {
 
 func (r *run) linkPath(kind, name, harness, src, dst string) {
 	if isLinkTo(dst, src) {
-		if r.mode != Unlink {
+		if !r.mode.releases() {
 			r.row(kind, name, harness, "linked")
 			return
 		}
@@ -219,7 +222,7 @@ func (r *run) linkPath(kind, name, harness, src, dst string) {
 		return
 	}
 	switch {
-	case r.mode == Unlink:
+	case r.mode.releases():
 	case exists(dst):
 		r.conflict(kind, name, harness, dst+" exists")
 	case r.mode == Status:
@@ -249,7 +252,7 @@ func (r *run) pruneSkills(harness, dir string, current []string) {
 		if err != nil || !strings.HasPrefix(target, owned) {
 			continue
 		}
-		if r.mode != Unlink && slices.Contains(current, e.Name()) && isLinkTo(path, filepath.Join(r.Source, "skills", e.Name())) {
+		if !r.mode.releases() && slices.Contains(current, e.Name()) && isLinkTo(path, filepath.Join(r.Source, "skills", e.Name())) {
 			continue
 		}
 		r.retire("skill", e.Name(), harness, path, "dangling")
@@ -266,7 +269,7 @@ func (r *run) retire(kind, name, harness, path, statusState string) {
 			return
 		}
 		state := "pruned"
-		if r.mode == Unlink {
+		if r.mode.releases() {
 			state = "removed"
 		}
 		r.did(kind, name, harness, state, state)
@@ -276,7 +279,7 @@ func (r *run) retire(kind, name, harness, path, statusState string) {
 func (r *run) linkInstructions(harness, dst string) {
 	src := filepath.Join(r.Source, "instructions", "AGENTS.md")
 	const kind, name = "instructions", "AGENTS.md"
-	if r.mode == Unlink {
+	if r.mode.releases() {
 		if !isLinkTo(dst, src) {
 			return
 		}
@@ -421,7 +424,7 @@ func (r *run) pruneAgents(harness string, defs []agentDef) {
 	}
 	for _, e := range entries {
 		tier, ok := strings.CutSuffix(e.Name(), ext)
-		if !ok || !e.Type().IsRegular() || r.mode != Unlink && slices.ContainsFunc(defs, func(d agentDef) bool { return d.Tier == tier }) {
+		if !ok || !e.Type().IsRegular() || !r.mode.releases() && slices.ContainsFunc(defs, func(d agentDef) bool { return d.Tier == tier }) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
