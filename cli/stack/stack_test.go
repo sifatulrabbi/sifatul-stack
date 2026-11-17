@@ -116,7 +116,7 @@ func codexAgent(t *testing.T, path string) map[string]any {
 func states(r stack.Report) map[string]string {
 	out := map[string]string{}
 	for _, row := range r.Rows {
-		out[row.Kind+" "+row.Name+" "+row.Harness] = row.State
+		out[row.Kind+" "+row.Name+" "+row.Harness] = string(row.State)
 	}
 	return out
 }
@@ -193,7 +193,7 @@ func TestLinkFreshHome(t *testing.T) {
 		t.Fatalf("second link has conflicts: %+v", again.Rows)
 	}
 	for _, row := range again.Rows {
-		if row.State != "linked" && !strings.HasSuffix(row.State, "current") {
+		if row.State != stack.Linked && row.State != stack.Current {
 			t.Errorf("second link changed %s %s %s: %s", row.Kind, row.Name, row.Harness, row.State)
 		}
 	}
@@ -213,9 +213,13 @@ func TestOpenCodeChoiceSurvivesRelink(t *testing.T) {
 	if !hasLine(read(t, filepath.Join(s.Layout.OpenCode, "agents", "senior.md")), "disabled: true") {
 		t.Error("senior was switched on")
 	}
-	st := states(run(t, s, stack.Status))
-	if st["agent associate opencode"] != "on, current" || st["agent senior opencode"] != "off, current" {
-		t.Errorf("status = %q / %q", st["agent associate opencode"], st["agent senior opencode"])
+	for _, row := range run(t, s, stack.Status).Rows {
+		if row.Kind != "agent" || row.Harness != "opencode" || (row.Name != "associate" && row.Name != "senior") {
+			continue
+		}
+		if row.State != stack.Current || row.Enabled == nil || *row.Enabled != (row.Name == "associate") {
+			t.Errorf("status of %s = %+v", row.Name, row)
+		}
 	}
 }
 
@@ -395,7 +399,7 @@ func changes(r stack.Report) map[string]string {
 	out := map[string]string{}
 	for _, row := range r.Rows {
 		if row.Change != "" {
-			out[row.Kind+" "+row.Name+" "+row.Harness] = row.Change
+			out[row.Kind+" "+row.Name+" "+row.Harness] = string(row.Change)
 		}
 	}
 	return out
@@ -416,7 +420,7 @@ func TestRowsSayWhatThisRunChanged(t *testing.T) {
 	if got["skill keep claude"] != "linked" || got["agent senior codex"] != "written" || got["instructions AGENTS.md codex"] != "linked" {
 		t.Errorf("fresh link changes = %v", got)
 	}
-	if !slices.ContainsFunc(first.Rows, func(r stack.Row) bool { return r.Change == "backed up" && r.Harness == "claude" }) {
+	if !slices.ContainsFunc(first.Rows, func(r stack.Row) bool { return r.Change == stack.DidBackUp && r.Harness == "claude" }) {
 		t.Errorf("no backed-up row for claude: %+v", first.Rows)
 	}
 
@@ -568,7 +572,7 @@ func TestLinkDoesNotWriteThroughForeignAgentSymlink(t *testing.T) {
 		t.Errorf("foreign symlink was replaced: %q", got)
 	}
 	if !slices.ContainsFunc(r.Rows, func(row stack.Row) bool {
-		return row.Conflict && row.Kind == "agent" && row.Name == "senior" && row.Harness == "claude"
+		return row.State == stack.Conflict && row.Kind == "agent" && row.Name == "senior" && row.Harness == "claude"
 	}) {
 		t.Errorf("foreign symlink not reported as a conflict: %+v", r.Rows)
 	}

@@ -45,13 +45,43 @@ func LayoutFromEnv(home string, getenv func(string) string) Layout {
 	}
 }
 
+type State string
+
+const (
+	Linked   State = "linked"
+	Current  State = "current"
+	Missing  State = "missing"
+	Stale    State = "stale"
+	Written  State = "written"
+	Dangling State = "dangling"
+	Orphaned State = "orphaned"
+	Removed  State = "removed"
+	Pruned   State = "pruned"
+	Restored State = "restored"
+	BackedUp State = "backed up"
+	Conflict State = "conflict"
+)
+
+type Change string
+
+const (
+	DidLink     Change = "linked"
+	DidWrite    Change = "written"
+	DidRerender Change = "re-rendered"
+	DidBackUp   Change = "backed up"
+	DidRestore  Change = "restored"
+	DidPrune    Change = "pruned"
+	DidRemove   Change = "removed"
+)
+
 type Row struct {
-	Kind     string
-	Name     string
-	Harness  string
-	State    string
-	Change   string
-	Conflict bool
+	Kind    string
+	Name    string
+	Harness string
+	State   State
+	Change  Change
+	Enabled *bool
+	Detail  string
 }
 
 type Report struct {
@@ -61,7 +91,7 @@ type Report struct {
 func (r Report) Conflicts() int {
 	n := 0
 	for _, row := range r.Rows {
-		if row.Conflict {
+		if row.State == Conflict {
 			n++
 		}
 	}
@@ -186,16 +216,16 @@ func (s Syncer) skills() ([]string, error) {
 	return names, nil
 }
 
-func (r *run) row(kind, name, harness, state string) {
+func (r *run) row(kind, name, harness string, state State) {
 	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: state})
 }
 
-func (r *run) did(kind, name, harness, state, change string) {
-	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: state, Change: change})
+func (r *run) did(kind, name, harness string, state State, change Change, detail string) {
+	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: state, Change: change, Detail: detail})
 }
 
 func (r *run) conflict(kind, name, harness, why string) {
-	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: "conflict: " + why, Conflict: true})
+	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: Conflict, Detail: why})
 }
 
 func (r *run) fail(kind, name, harness string, err error) {
@@ -215,14 +245,14 @@ func exists(path string) bool {
 func (r *run) linkPath(kind, name, harness, src, dst string) {
 	if isLinkTo(dst, src) {
 		if !r.mode.releases() {
-			r.row(kind, name, harness, "linked")
+			r.row(kind, name, harness, Linked)
 			return
 		}
 		if err := os.Remove(dst); err != nil {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		r.did(kind, name, harness, "removed", "removed")
+		r.did(kind, name, harness, Removed, DidRemove, "")
 		return
 	}
 	switch {
@@ -230,7 +260,7 @@ func (r *run) linkPath(kind, name, harness, src, dst string) {
 	case exists(dst):
 		r.conflict(kind, name, harness, dst+" exists")
 	case r.mode == Status:
-		r.row(kind, name, harness, "missing")
+		r.row(kind, name, harness, Missing)
 	default:
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			r.fail(kind, name, harness, err)
@@ -240,7 +270,7 @@ func (r *run) linkPath(kind, name, harness, src, dst string) {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		r.did(kind, name, harness, "linked", "linked")
+		r.did(kind, name, harness, Linked, DidLink, "")
 	}
 }
 
@@ -259,11 +289,11 @@ func (r *run) pruneSkills(harness, dir string, current []string) {
 		if !r.mode.releases() && slices.Contains(current, e.Name()) && isLinkTo(path, filepath.Join(r.Source, "skills", e.Name())) {
 			continue
 		}
-		r.retire("skill", e.Name(), harness, path, "dangling")
+		r.retire("skill", e.Name(), harness, path, Dangling)
 	}
 }
 
-func (r *run) retire(kind, name, harness, path, statusState string) {
+func (r *run) retire(kind, name, harness, path string, statusState State) {
 	switch r.mode {
 	case Status:
 		r.row(kind, name, harness, statusState)
@@ -272,11 +302,11 @@ func (r *run) retire(kind, name, harness, path, statusState string) {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		state := "pruned"
 		if r.mode.releases() {
-			state = "removed"
+			r.did(kind, name, harness, Removed, DidRemove, "")
+			return
 		}
-		r.did(kind, name, harness, state, state)
+		r.did(kind, name, harness, Pruned, DidPrune, "")
 	}
 }
 
@@ -293,19 +323,19 @@ func (r *run) linkInstructions(harness, dst string) {
 		}
 		newest := newestBackup(dst)
 		if newest == "" {
-			r.did(kind, name, harness, "removed", "removed")
+			r.did(kind, name, harness, Removed, DidRemove, "")
 			return
 		}
 		if err := os.Rename(newest, dst); err != nil {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		r.did(kind, name, harness, "restored "+filepath.Base(newest), "restored")
+		r.did(kind, name, harness, Restored, DidRestore, filepath.Base(newest))
 		return
 	}
 	if fi, err := os.Lstat(dst); err == nil && fi.Mode().IsRegular() {
 		if r.mode == Status {
-			r.row(kind, name, harness, "missing (link backs up "+dst+")")
+			r.did(kind, name, harness, Missing, "", dst)
 			return
 		}
 		backup := dst + ".backup-" + r.Now().Format("20060102150405")
@@ -313,7 +343,7 @@ func (r *run) linkInstructions(harness, dst string) {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		r.did(kind, name, harness, "backed up to "+filepath.Base(backup), "backed up")
+		r.did(kind, name, harness, BackedUp, DidBackUp, filepath.Base(backup))
 	}
 	r.linkPath(kind, name, harness, src, dst)
 }
@@ -384,15 +414,17 @@ func (r *run) syncAgent(d agentDef, h Harness) {
 	}
 	enabled := !h.toggles || (present && !slices.Contains(strings.Split(text, "\n"), "disabled: true"))
 	wanted := h.render(d, d.Models[h.Key], enabled)
-	state := "stale"
+	row := Row{Kind: "agent", Name: d.Tier, Harness: h.Key, State: Stale}
+	if h.toggles {
+		row.Enabled = &enabled
+	}
 	switch {
 	case !present:
-		state = "missing"
+		row.State = Missing
 	case text == wanted:
-		state = "current"
+		row.State = Current
 	}
-	change := ""
-	if r.mode == Link && state != "current" {
+	if r.mode == Link && row.State != Current {
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			r.fail("agent", d.Tier, h.Key, err)
 			return
@@ -401,13 +433,10 @@ func (r *run) syncAgent(d agentDef, h Harness) {
 			r.fail("agent", d.Tier, h.Key, err)
 			return
 		}
-		change = map[string]string{"missing": "written", "stale": "re-rendered"}[state]
-		state = "written"
+		row.Change = map[State]Change{Missing: DidWrite, Stale: DidRerender}[row.State]
+		row.State = Written
 	}
-	if h.toggles {
-		state = map[bool]string{true: "on", false: "off"}[enabled] + ", " + state
-	}
-	r.did("agent", d.Tier, h.Key, state, change)
+	r.report.Rows = append(r.report.Rows, row)
 }
 
 func (r *run) pruneAgents(h Harness, defs []agentDef) {
@@ -426,6 +455,6 @@ func (r *run) pruneAgents(h Harness, defs []agentDef) {
 		if err != nil || !managed(string(raw)) {
 			continue
 		}
-		r.retire("agent", tier, h.Key, path, "orphaned")
+		r.retire("agent", tier, h.Key, path, Orphaned)
 	}
 }

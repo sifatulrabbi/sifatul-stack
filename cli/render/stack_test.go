@@ -9,8 +9,12 @@ import (
 	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 )
 
-func row(kind, name, harness, state, change string) stack.Row {
+func row(kind, name, harness string, state stack.State, change stack.Change) stack.Row {
 	return stack.Row{Kind: kind, Name: name, Harness: harness, State: state, Change: change}
+}
+
+func toggled(name string, enabled bool) stack.Row {
+	return stack.Row{Kind: "agent", Name: name, Harness: "opencode", State: stack.Current, Enabled: &enabled}
 }
 
 func freshSetup() []stack.Row {
@@ -19,13 +23,13 @@ func freshSetup() []stack.Row {
 		rows = append(rows, row("skill", sk, "claude", "linked", "linked"), row("skill", sk, "agents", "linked", "linked"))
 	}
 	rows = append(rows,
-		row("instructions", "AGENTS.md", "claude", "backed up to CLAUDE.md.backup-20261116120000", "backed up"),
+		stack.Row{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.BackedUp, Change: stack.DidBackUp, Detail: "CLAUDE.md.backup-20261116120000"},
 		row("instructions", "AGENTS.md", "claude", "linked", "linked"),
 		row("instructions", "AGENTS.md", "codex", "linked", ""),
 		row("agent", "senior", "claude", "current", ""),
 		row("agent", "senior", "codex", "written", "re-rendered"),
-		row("agent", "senior", "opencode", "off, current", ""),
-		stack.Row{Kind: "skill", Name: "x", Harness: "claude", State: "conflict: /h/.claude/skills/x exists", Conflict: true},
+		toggled("senior", false),
+		stack.Row{Kind: "skill", Name: "x", Harness: "claude", State: stack.Conflict, Detail: "/h/.claude/skills/x exists"},
 	)
 	return rows
 }
@@ -65,7 +69,7 @@ func TestStackSummaryGroupsChangesByKind(t *testing.T) {
 func TestStackSummaryOfARemoval(t *testing.T) {
 	out := plainSummary(t, []stack.Row{
 		row("skill", "a", "claude", "removed", "removed"),
-		row("instructions", "AGENTS.md", "claude", "restored CLAUDE.md.backup-1", "restored"),
+		stack.Row{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.Restored, Change: stack.DidRestore, Detail: "CLAUDE.md.backup-1"},
 		row("instructions", "AGENTS.md", "codex", "removed", "removed"),
 	})
 	if strings.Contains(out, "✓") || !strings.Contains(out, "− removed  a") || !strings.Contains(out, "• restored  Claude Code (CLAUDE.md.backup-1)") || !strings.Contains(out, "− removed  Codex") {
@@ -80,8 +84,8 @@ func TestStackStatusIsAMatrixWithAFixHint(t *testing.T) {
 		row("skill", "tdd", "agents", "missing", ""),
 		row("skill", "old", "claude", "dangling", ""),
 		row("agent", "senior", "claude", "stale", ""),
-		row("agent", "senior", "opencode", "on, current", ""),
-		row("agent", "junior", "opencode", "off, current", ""),
+		toggled("senior", true),
+		toggled("junior", false),
 	}))
 	if err != nil {
 		t.Fatal(err)
