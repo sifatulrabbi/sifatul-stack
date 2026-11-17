@@ -15,7 +15,7 @@ Single-threaded logic bugs, security, performance, style, tests.
 3. Check check-then-act and read-modify-write sequences for a transaction, lock, or atomic operation.
 4. For retried or redelivered work, check it's safe to run twice.
 
-Write the `trigger` as a step-by-step interleaving.
+Write the `## Trigger` as a step-by-step interleaving.
 
 ## Not a finding
 

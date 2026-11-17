@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Remove the review and scratch worktrees for a run. The run directory is kept.
-# Usage (from the repo root): cleanup_run.sh <run-id>
 set -euo pipefail
 
-run_id="${1:?usage: cleanup_run.sh <run-id>}"
+target="${1:?usage: cleanup_run.sh <target: pr<n> or branch>}"
+target="${target//\//-}"
 repo="$(basename "$(git rev-parse --show-toplevel)")"
-wt_base="/tmp/full-review-worktrees/$repo/$run_id"
+wt_target="/tmp/full-review-worktrees/$repo/$target"
 
-if [ -d "$wt_base" ]; then
-  for wt in "$wt_base"/*/; do
+if [ -d "$wt_target" ]; then
+  for wt in "$wt_target"/round-*/*/; do
     [ -d "$wt" ] && git worktree remove --force "$wt" 2>/dev/null || true
   done
-  rm -rf "$wt_base"
+  rm -rf "$wt_target"
+  rmdir "${wt_target%/*}" 2>/dev/null || true
 fi
 git worktree prune
-echo "Removed worktrees for $run_id"
+echo "Removed worktrees for $target"
