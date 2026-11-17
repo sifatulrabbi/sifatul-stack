@@ -106,13 +106,16 @@ func (r *run) on(harnesses ...string) *run {
 }
 
 func (s Syncer) Run(mode Mode) (Report, error) {
-	defs, err := loadAgents(s.Source)
-	if err != nil {
-		return Report{}, err
-	}
-	skills, err := s.skills()
-	if err != nil {
-		return Report{}, err
+	var defs []agentDef
+	var skills []string
+	if mode != Unlink {
+		var err error
+		if defs, err = loadAgents(s.Source); err != nil {
+			return Report{}, err
+		}
+		if skills, err = s.skills(); err != nil {
+			return Report{}, err
+		}
 	}
 	r := &run{Syncer: s, mode: mode, report: &Report{}}
 	targets := []struct {
@@ -128,8 +131,10 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 		if x == nil {
 			continue
 		}
-		for _, name := range skills {
-			x.linkPath("skill", name, t.harness, filepath.Join(s.Source, "skills", name), filepath.Join(t.dir, name))
+		if x.mode != Unlink {
+			for _, name := range skills {
+				x.linkPath("skill", name, t.harness, filepath.Join(s.Source, "skills", name), filepath.Join(t.dir, name))
+			}
 		}
 		x.pruneSkills(t.harness, t.dir, skills)
 	}
@@ -142,7 +147,7 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 
 	for _, d := range defs {
 		for _, h := range Harnesses {
-			if x := r.on(h); x != nil {
+			if x := r.on(h); x != nil && x.mode != Unlink {
 				if err := x.syncAgent(d, h); err != nil {
 					return *r.report, err
 				}
@@ -368,25 +373,11 @@ func (r *run) syncAgent(d agentDef, harness string) error {
 	dst := r.agentPath(d.Tier, harness)
 	text, present, err := readAgent(dst)
 	if err != nil {
-		if r.mode != Unlink {
-			r.conflict("agent", d.Tier, harness, err.Error())
-		}
+		r.conflict("agent", d.Tier, harness, err.Error())
 		return nil
 	}
 	if present && !managed(text) {
-		if r.mode != Unlink {
-			r.conflict("agent", d.Tier, harness, dst+" is not managed by sifatul-stack")
-		}
-		return nil
-	}
-	if r.mode == Unlink {
-		if present {
-			if err := os.Remove(dst); err != nil {
-				r.fail("agent", d.Tier, harness, err)
-				return nil
-			}
-			r.did("agent", d.Tier, harness, "removed", "removed")
-		}
+		r.conflict("agent", d.Tier, harness, dst+" is not managed by sifatul-stack")
 		return nil
 	}
 	enabled := harness != "opencode" || (present && !slices.Contains(strings.Split(text, "\n"), "disabled: true"))
@@ -430,7 +421,7 @@ func (r *run) pruneAgents(harness string, defs []agentDef) {
 	}
 	for _, e := range entries {
 		tier, ok := strings.CutSuffix(e.Name(), ext)
-		if !ok || e.IsDir() || slices.ContainsFunc(defs, func(d agentDef) bool { return d.Tier == tier }) {
+		if !ok || !e.Type().IsRegular() || r.mode != Unlink && slices.ContainsFunc(defs, func(d agentDef) bool { return d.Tier == tier }) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())

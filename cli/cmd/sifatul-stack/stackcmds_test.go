@@ -400,3 +400,38 @@ func TestSetupFlagSkipsThePicker(t *testing.T) {
 	}
 	f.mustRun("setup", "--harness", "codex")
 }
+
+func TestRemoveAndSetupSurviveAMovedCheckout(t *testing.T) {
+	for name, next := range map[string][]string{"remove": {"remove"}, "setup": {"setup"}, "setup from": {"setup", "--from", ""}} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			old := filepath.Join(resolved(t, t.TempDir()), "checkout")
+			if err := os.Rename(f.upstream, old); err != nil {
+				t.Fatal(err)
+			}
+			f.mustRun("setup", "--from", old)
+			moved := old + "-moved"
+			if err := os.Rename(old, moved); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(moved, f.upstream); err != nil {
+				t.Fatal(err)
+			}
+			args := slices.Clone(next)
+			if len(args) == 3 {
+				args[2] = moved
+			}
+			if out, code := f.run(args...); code != 0 {
+				t.Fatalf("%v exited %d:\n%s", args, code, out)
+			}
+			for _, link := range []string{
+				filepath.Join(f.env.layout.Claude, "skills", "full-review"),
+				filepath.Join(f.env.layout.Claude, "CLAUDE.md"),
+			} {
+				if target, err := os.Readlink(link); err == nil && strings.HasPrefix(target, old+string(filepath.Separator)) {
+					t.Errorf("%s still points into the moved checkout: %s", link, target)
+				}
+			}
+		})
+	}
+}

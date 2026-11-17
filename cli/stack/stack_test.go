@@ -597,3 +597,27 @@ func TestLinkDoesNotOverwriteUnreadableForeignAgent(t *testing.T) {
 		t.Errorf("conflicts = %d, want 1: %+v", r.Conflicts(), r.Rows)
 	}
 }
+
+func TestUnlinkWorksAfterTheSourceIsGone(t *testing.T) {
+	src := fixtureSource(t, "keep")
+	s := newSyncer(t, src)
+	l := s.Layout
+	run(t, s, stack.Link)
+	if err := os.RemoveAll(src); err != nil {
+		t.Fatal(err)
+	}
+
+	if r := run(t, s, stack.Unlink); r.Conflicts() != 0 {
+		t.Errorf("unlink conflicts: %+v", r.Rows)
+	}
+
+	for _, p := range []string{
+		filepath.Join(l.Claude, "skills", "keep"),
+		filepath.Join(l.AgentsSkills, "keep"),
+		filepath.Join(l.Claude, "CLAUDE.md"),
+		filepath.Join(l.Codex, "agents", "senior.toml"),
+		filepath.Join(l.OpenCode, "agents", "junior.md"),
+	} {
+		assertMissing(t, p)
+	}
+}
