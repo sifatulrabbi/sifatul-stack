@@ -487,3 +487,21 @@ func TestSyncStopsOnAGitErrorInsteadOfRecloning(t *testing.T) {
 		t.Error("sync re-cloned after a git error")
 	}
 }
+
+func TestTracksFindsADefaultBranchNotNamedMain(t *testing.T) {
+	u := newUpstream(t)
+	git(t, "-C", u.dir, "branch", "-m", "main", "trunk")
+	r := repo(t, u)
+	if _, err := r.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if !tracks(t, r) {
+		t.Error("a fresh clone of the trunk default branch should track it")
+	}
+	main := r
+	main.Branch = "main"
+	if tracks(t, main) {
+		t.Error("a clone of trunk does not track main")
+	}
+}
