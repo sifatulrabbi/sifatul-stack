@@ -8,13 +8,13 @@ Every specialist follows this. Your job file has all the paths; reread it whenev
 - **Own your concern across your whole scope**, however many files that is. Stay out of other specialists' concerns (listed in your job file). If you notice something serious outside yours, add a one-line handoff and move on.
 - **Don't repeat CI or linter results** listed in the brief.
 - **Honor the repo's conventions files** listed in the brief: something they explicitly allow is not a finding.
-- **Skip already-decided findings.** The brief's "Already decided" section lists findings an earlier round kept or dropped, with reasons. Report one again only if its lines changed since that round or you have evidence the earlier reason missed, and say which in `## Evidence`.
+- **Skip already-decided findings.** The brief's "Already decided" section lists findings an earlier round kept or dropped, with reasons. Kept ones are re-verified separately; never report them again. Report a dropped one again only if its lines changed since that round or you have evidence the earlier reason missed, and say which in `## Evidence`.
 
 ## Reading
 
 - **Read high-logic files whole**, not just the hunks: migrations, stores and repositories, state machines, concurrency code, and path or permission handling. A bug there often sits in an unchanged line the change now reaches.
 - **Distrust comments and the PR body.** They state intent, not behavior. Check every claim they make against the code before relying on it.
-- **Trace every rename, move, or delete** of an id, key, column, file, or symbol to each table, store, cache, config, and caller that holds it. Leftover references to the old name are where these changes break.
+- **Trace every rename, move, or delete** of an id, key, enum value, column, file, or symbol to each table, store, cache, config, serialized payload, and caller that holds it. Leftover references to the old name are where these changes break.
 
 ## Notes file
 

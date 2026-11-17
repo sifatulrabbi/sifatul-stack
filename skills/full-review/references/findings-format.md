@@ -35,6 +35,7 @@ Move ownership checks into a route-level middleware so new handlers get them by 
 - `severity`: `critical`, `high`, `medium`, or `low`, from the severity rubric.
 - `## Trigger`: how to make it go wrong. The verifier starts here, so make it concrete.
 - `## Fix`: the smallest change that closes the gap.
+- `carried_from` (carried findings only): the previous round's verdict file for this finding, which the verifier reruns.
 - `## Alternative` (optional): the bigger root-cause direction, when the real gap deserves more than the smallest fix (a redesign, a new layer, replacing a framework). It carries no severity and reaches the review only if its finding survives verification.
 
 ## Specialist done file: `findings/<job>/_done.md`
@@ -83,5 +84,6 @@ it("rejects PATCH on another user", async () => {
 - `severity`: the final severity; explain a change in `## Notes`.
 - `duplicate_of`: the id of the finding kept instead, when status is `duplicate`.
 - `regression_test_target`: the file the regression test belongs in, when there is one.
+- `alternative: drop`: the finding's `## Alternative` makes a false factual claim; it stays out of the review.
 - `## Evidence`: the first line is the one-line reason shown for dropped findings, so lead with the verdict's reason.
 - `## Regression test`: the test that went red on the bug or mutation, for confirmed bugs and missing tests; omit otherwise.

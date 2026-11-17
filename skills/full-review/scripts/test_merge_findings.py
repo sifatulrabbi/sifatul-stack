@@ -123,16 +123,40 @@ class MergeTest(RoundTest):
         self.assertIn("findings/security/1.md: severity", res.stderr)
         self.assertEqual(self.r.jobs(), [])
 
-    def test_folds_an_overlapping_finding_from_the_same_specialist(self):
-        self.r.add("security", 1, finding(lines="120-134", severity="medium"))
-        self.r.add("security", 2, finding(lines="125-130", severity="high"))
+    def test_sends_overlapping_findings_from_one_specialist_to_the_verifier(self):
+        self.r.add("security", 1, finding(lines="120-134", title="Off by one"))
+        self.r.add("security", 2, finding(lines="122", title="Null deref"))
         self.r.done("security")
 
         self.r.run("merge")
 
         job = self.r.job("verify-1")
+        self.assertIn("security-1:", job)
         self.assertIn("security-2:", job)
-        self.assertNotIn("security-1:", job)
+
+    def test_refuses_a_finding_with_unreadable_lines(self):
+        self.r.add("security", 1, finding(lines="10–14"))
+        self.r.done("security")
+
+        res = self.r.run("merge")
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("findings/security/1.md: lines", res.stderr)
+        self.assertEqual(self.r.jobs(), [])
+
+    def test_rerun_writes_new_jobs_only_for_unverified_findings(self):
+        self.r.add("security", 1, finding(file="a.ts"))
+        self.r.add("security", 2, finding(file="b.ts"))
+        self.r.done("security")
+        self.r.run("merge")
+        self.r.verify("security-1", verdict())
+
+        self.r.run("merge")
+
+        self.assertEqual(self.r.jobs(), ["verify-1", "verify-2"])
+        rerun = self.r.job("verify-2")
+        self.assertIn("security-2:", rerun)
+        self.assertNotIn("security-1:", rerun)
 
     def test_keeps_overlapping_findings_together_when_splitting_batches(self):
         self.r.add("security", 1, finding(file="a.ts", lines="10-20"))
@@ -175,6 +199,7 @@ class FinalTest(RoundTest):
         self.r.done("security")
         self.r.done("tests")
         self.r.verify("security-1", verdict())
+        self.r.verify("security-2", verdict(status="duplicate", extra_meta="duplicate_of: security-1\n"))
         self.r.verify("tests-1", verdict(status="refuted", evidence="Retry is bounded at line 40.\nSee test output."))
 
         self.r.run("final")
@@ -182,7 +207,7 @@ class FinalTest(RoundTest):
         final = self.r.final()
         dropped = final[final.index("## Dropped"):]
         self.assertIn("| refuted | Flaky retry | b.ts:120-134 | Retry is bounded at line 40. |", dropped)
-        self.assertIn("| duplicate | Same check again | a.ts:12-14 | folded into security-1 |", dropped)
+        self.assertIn("| duplicate | Same check again | a.ts:12-14 | duplicate of security-1 |", dropped)
 
 
     def test_lists_findings_no_verifier_reached_as_unverified(self):
@@ -209,6 +234,24 @@ class FinalTest(RoundTest):
         final = self.r.final()
         self.assertIn("Move auth into middleware.", final[final.index("## Alternative directions"):])
         self.assertNotIn("Replace the mock framework.", final)
+
+    def test_leaves_out_an_alternative_the_verifier_rejected(self):
+        self.r.add("tests", 1, finding(extra="\n## Alternative\nMove auth into middleware.\n"))
+        self.r.done("tests")
+        self.r.verify("tests-1", verdict(extra_meta="alternative: drop\n"))
+
+        self.r.run("final")
+
+        self.assertNotIn("Move auth into middleware.", self.r.final())
+
+    def test_escapes_pipes_in_titles_so_tables_hold(self):
+        self.r.add("security", 1, finding(file="a.ts", title="a || b short-circuits"))
+        self.r.done("security")
+        self.r.verify("security-1", verdict())
+
+        self.r.run("final")
+
+        self.assertIn("| a \\|\\| b short-circuits | a.ts:120-134 |", self.r.final())
 
 
     def test_refuses_a_verdict_with_an_unknown_status(self):

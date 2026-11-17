@@ -20,7 +20,7 @@ Paths below: `SKILL_DIR` is this skill's directory; `ROUND_DIR`, `PREV_ROUND_DIR
 
 ## 0. Fresh session
 
-A review is only cold if its reviewer didn't write the code. If this session edited, committed, planned, or implemented any of the code under review, stop and tell the user: `Start a new session in this repo and run full-review on <target>.` There is no override. A freshly spawned sub-agent has no such history and passes.
+A review is only cold if its reviewer didn't write the code. If this session edited, committed, planned, or implemented any of the code under review, stop and tell the user: `Start a new session in this repo and run full-review on <target>.` There is no override. The specialists and verifiers you launch start with no history of the code, so they pass this check.
 
 ## 1. Set up the round
 
@@ -49,10 +49,10 @@ Run `SKILL_DIR/scripts/init_run.sh <target> <head-sha>` from the repo root. Each
 
 ## 2. Triage
 
-1. **Related open PRs** (GitHub PRs only): launch an `associate` now with the job in "Related open PRs" below; it runs while you triage.
-2. `python3 SKILL_DIR/scripts/classify_hunks.py --base <base> --head <head-sha> -o ROUND_DIR/hunks.md`. It labels hunks as whitespace, comment, lockfile, generated, rename, docs, binary, or semantic. The labels are heuristics: skim the mechanical section (cheap) and treat anything that isn't really mechanical as semantic. Only semantic hunks go to specialists; lockfile hunks go to the dependencies specialist.
-3. Read the PR title and description, linked issue, CI results (`gh pr checks <n>`), and the semantic diff.
-4. **Intent check:** does the diff do what the PR claims, and only that? Note missing pieces, unrelated changes, and scope creep.
+1. `python3 SKILL_DIR/scripts/classify_hunks.py --base <base> --head <head-sha> -o ROUND_DIR/hunks.md`. It always diffs base to head, on a re-review too. It labels hunks as whitespace, comment, lockfile, generated, rename, docs, binary, or semantic. The labels are heuristics: skim the mechanical section (cheap) and treat anything that isn't really mechanical as semantic. Only semantic hunks go to specialists; lockfile hunks go to the dependencies specialist.
+2. Read the PR title and description, linked issue, CI results (`gh pr checks <n>`), and the semantic diff.
+3. **Related open PRs** (GitHub PRs only): launch an `associate` now with the job in "Related open PRs" below, listing the symbols this PR renames, removes, or changes the signature of; it runs while you finish triage.
+4. **Intent check:** does the diff do what the PR claims, and only that? Write each missing piece (a claimed behavior the diff doesn't deliver, a caller or migration it needs and lacks) as a finding in `ROUND_DIR/findings/lead/`, then write its `_done.md`; on the solo path, write `_done.md` after your review instead. Note unrelated changes and scope creep for the brief.
 5. **Risk map:** which parts of the change carry which risks (auth, data, public API, concurrency, rollout…).
 
 Size is semantic surface and risk, never file count: 100 files of renames is small, three files rewriting auth is not. Choose a path:
@@ -63,7 +63,7 @@ Size is semantic surface and risk, never file count: 100 files of renames is sma
 
 ## 3. Brief and routing
 
-Write `ROUND_DIR/brief.md`: base and head, `REVIEW_TREE`, intent (claimed vs actual), risk map, repo convention files to honor (REVIEW.md, CLAUDE.md, CONTRIBUTING.md, if present), what CI and linters already reported so nobody repeats it, related open PRs that overlap this one (number, title, shared files), and what's out of scope. On a re-review, add the "Already decided" section described below.
+Write `ROUND_DIR/brief.md`: base and head, `REVIEW_TREE`, intent (claimed vs actual), risk map, repo convention files to honor (REVIEW.md, CLAUDE.md, CONTRIBUTING.md, if present), what CI and linters already reported so nobody repeats it, related open PRs that overlap this one (number, title, shared files, from `related-prs.md`: wait for it), and what's out of scope. On a re-review, add the "Already decided" section described below.
 
 Each specialist owns its whole concern area across every file it touches: one job per concern, whatever the file count. Launch only specialists whose trigger matches the risk map. Every specialist runs on `senior`: reviewing is judgment and discovery, which a `junior` can't verify its way through. Correctness runs on nearly every team review.
 
@@ -85,9 +85,23 @@ If the risk map shows a concern no specialist covers (billing math, a specific f
 
 ## 4. Launch specialists
 
-First, launch an `associate` scout to gather facts for each job (callers and importers of changed symbols, related tests, interface definitions) into `ROUND_DIR/jobs/<job>-context.md`. Facts only: paths, line ranges, snippets.
+First, for each specialist job, write `ROUND_DIR/jobs/<job>-scout.md` and launch an `associate` on it with the prompt `You are a code review scout. Read your job file at ROUND_DIR/jobs/<job>-scout.md and follow it.`
 
-Then write `ROUND_DIR/jobs/<job>.md` for each specialist:
+```markdown
+# Job: <job>-scout
+
+Code: REVIEW_TREE
+Scope: <the specialist's scope>
+Output: ROUND_DIR/jobs/<job>-context.md
+
+Facts only, no judgments: paths, line ranges, short snippets. For the code in scope, collect:
+
+- callers and importers of every changed symbol;
+- tests that exercise the changed code;
+- interface and type definitions the changed code implements or uses.
+```
+
+When the scouts finish, write `ROUND_DIR/jobs/<job>.md` for each specialist:
 
 ```markdown
 # Job: <job>
@@ -110,9 +124,11 @@ Launch all specialists in parallel, each as its agent with this prompt: `You are
 
 ## 5. Collect
 
+First, judge the related open PRs in `related-prs.md` as described in "Related open PRs" below and write their findings.
+
 A specialist is finished when its `findings/<job>/_done.md` exists. Read each one:
 
-- **Uncovered**: relaunch that job for the remaining scope.
+- **Uncovered**: launch a new job `<job>-rest` with the same role for the remaining scope; the first job's findings stay where they are.
 - **Escalations**: launch the same specialist again for just those hunks (new job, e.g. `security-esc`), so it can go deeper on a narrower scope.
 - **Handoffs**: if one points at a concern no running specialist covers, decide whether it needs its own job.
 
@@ -120,10 +136,10 @@ A specialist is finished when its `findings/<job>/_done.md` exists. Read each on
 
 Every finding is verified. The user should only see findings that survived an attempt to reproduce them.
 
-1. `python3 SKILL_DIR/scripts/merge_findings.py merge ROUND_DIR --review-tree REVIEW_TREE --worktree-base WORKTREE_BASE`. It folds duplicates from the same specialist, clusters overlapping findings, and writes one verifier job per batch as `ROUND_DIR/jobs/verify-<n>.md`. It refuses while a specialist has no `_done.md` or a finding is malformed, naming the file: relaunch that agent to finish or fix it.
-2. For each verifier job, create its scratch worktree: `git worktree add --detach WORKTREE_BASE/verify-<n> <head-sha>`.
-3. Launch all verifiers in parallel on `senior` with the same one-line prompt pointing at the job file.
-4. `python3 SKILL_DIR/scripts/merge_findings.py final ROUND_DIR` writes `final.md`: kept findings (confirmed and plausible) sorted by severity, alternative directions from kept findings, dropped findings with their reasons, and any finding no verifier reached. Relaunch verifiers for unverified findings, or for a verdict the script refuses, then run it again.
+1. `python3 SKILL_DIR/scripts/merge_findings.py merge ROUND_DIR --review-tree REVIEW_TREE --worktree-base WORKTREE_BASE`. It clusters overlapping findings and writes one verifier job per batch as `ROUND_DIR/jobs/verify-<n>.md`, skipping findings that already have a verdict and numbering after existing jobs. It refuses while a specialist has no `_done.md` or a finding is malformed, naming the file: relaunch that agent to finish or fix it.
+2. For each new verifier job, create its scratch worktree: `git worktree add --detach WORKTREE_BASE/verify-<n> <head-sha>`.
+3. Launch all new verifiers in parallel on `senior`, each with the prompt `You are a code review verifier. Read your job file at ROUND_DIR/jobs/verify-<n>.md and follow it.`
+4. `python3 SKILL_DIR/scripts/merge_findings.py final ROUND_DIR` writes `final.md`: kept findings (confirmed and plausible) sorted by severity, alternative directions from kept findings, dropped findings with their reasons, and any finding no verifier reached. If it lists unverified findings or refuses a verdict, delete the refused verdict files, then repeat from 1: merge writes jobs only for what still lacks a verdict.
 
 ## 7. Write the review
 
@@ -159,6 +175,8 @@ Broader changes worth considering. They don't affect the verdict.
 Reviewed for: <concerns covered>. <N> findings dropped in verification (<refuted>, <unproven>, <duplicates>); reasons in ROUND_DIR/final.md.
 ```
 
+The verdict follows the kept findings: any confirmed critical or high means changes requested; for a plausible critical or high, decide from its traced path and say which way you went in the reason. Otherwise approve with suggestions when anything is kept, and approve when nothing is.
+
 Write in one voice; don't attribute findings to specialists. Merge findings that turn out to be the same root cause. Omit the related PRs and alternatives sections when empty.
 
 Post to the PR only when the user asks (asking up front counts as confirmation). Summary comment: `gh pr comment <n> --body-file ROUND_DIR/review.md`. Inline: one PR review via `gh api repos/{owner}/{repo}/pulls/<n>/reviews` with a `comments` array, so it lands as a single review. Never approve or request changes on the PR unless asked.
@@ -179,18 +197,21 @@ Output: ROUND_DIR/related-prs.md
 
 Facts only; no verdicts.
 
-1. List every open PR except #<n>, drafts included, with no limit: `gh pr list --state open --limit 1000 --json number,title,url,author,isDraft,baseRefName,headRefOid,files`. The `files` list stops at 100; for a PR with 100 files, get the full list with `gh pr diff <m> --name-only`.
-2. Keep the PRs that change at least one file this PR changes. For each, `git fetch origin pull/<m>/head`, then record: the shared files; per shared file, the line ranges each PR changes and whether they overlap; functions or symbols both PRs change; and `git merge-tree --write-tree --name-only <head-sha> <their head>` (exit 1 means conflict: list the conflicted files).
-3. Write the output as one `## #<m> <title>` section per PR with url, author, draft, base, and the facts above. Start the file with how many open PRs you checked and how many share files. If `gh` or GitHub is unavailable, write one line saying why and stop.
+Symbols this PR renames, removes, or changes the signature of: <list, or none>
+
+1. List every open PR except #<n>, drafts included, with no limit: `gh pr list --state open --limit 1000 --json number,title,url,author,isDraft,updatedAt,baseRefName,headRefOid,files`. The `files` list stops at 100; for a PR with 100 files, get the full list with `gh pr diff <m> --name-only`.
+2. Keep the PRs that change at least one file this PR changes. For each, `git fetch origin pull/<m>/head`, then record: the shared files; per shared file, the base-side line ranges each PR changes (the `-start,count` of each hunk header in `git diff origin/<its base>...<its head>`) and whether they overlap; functions or symbols both PRs change; and `git merge-tree --write-tree --name-only <head-sha> <their head>` (exit 1 means conflict: list the conflicted files).
+3. For each symbol listed above, search every other open PR's diff (`gh pr diff <m>`), shared files or not, and record each PR whose added lines still use it, with file and line.
+4. Write the output as one `## #<m> <title>` section per PR with url, author, draft, last update, base, and the facts above. Start the file with how many open PRs you checked, how many share files, and how many use a listed symbol. If `gh` or GitHub is unavailable, write one line saying why and stop.
 ```
 
-When it finishes, judge each PR it lists: **independent**, **text conflict** (merge-tree conflicts, meaning compatible), **conflict in meaning** (merges cleanly or not, but together they behave wrong: both change the same behavior, one relies on what the other changes), or **dependency** (one needs the other merged first). Every verdict except independent becomes a finding in `ROUND_DIR/findings/related-prs/<n>.md` at the overlapping location in this PR, with severity from the rubric and a trigger naming both heads; then write `findings/related-prs/_done.md`. They are verified like every other finding. If the check was skipped, say so in the review footer.
+When it finishes, judge each PR it lists (a PR that still uses a symbol this PR renames or removes is at least a dependency): **independent**, **text conflict** (merge-tree conflicts, meaning compatible), **conflict in meaning** (merges cleanly or not, but together they behave wrong: both change the same behavior, one relies on what the other changes), or **dependency** (one needs the other merged first). Every verdict except independent becomes a finding in `ROUND_DIR/findings/related-prs/<n>.md` at the overlapping location in this PR, with severity from the rubric and a trigger naming both heads; then write `findings/related-prs/_done.md`. They are verified like every other finding. If the check was skipped, say so in the review footer.
 
 ## Re-review
 
 When `PREV_ROUND_DIR` is set, this round reviews what changed since that round's head (in its `round.md`):
 
-- **Already decided.** Add an "Already decided" section to the brief listing every finding from `PREV_ROUND_DIR/final.md`, kept and dropped, with title, location, status, and reason. Specialists don't report these again unless the lines changed or they have new evidence.
-- **Routing.** Route specialists to the concerns that `git diff <previous head> <head-sha>` touches, with that diff as their scope.
-- **Carried findings.** Kept findings whose lines are unchanged carry over without re-verification. Copy each kept finding whose lines changed into `findings/carried/<n>.md`, with `file` and `lines` moved to where that code sits at this head (then write `findings/carried/_done.md`) so it is verified again.
-- **Review.** Say which findings were carried over, which were re-verified, and which earlier findings the new pushes fixed.
+- **Already decided.** Add an "Already decided" section to the brief listing every finding from `PREV_ROUND_DIR/final.md`, kept and dropped, with title, location, status, and reason. Specialists never report kept ones again (they are carried, below) and report a dropped one only if its lines changed or they have new evidence.
+- **Routing.** If `git merge-base --is-ancestor <previous head> <head-sha>` succeeds, route specialists to the concerns that `git diff <previous head> <head-sha>` touches, with that diff as their scope. If it fails, the branch was rebased or force-pushed and that diff would mix in base changes: route and scope specialists on the full PR diff as in a first round. `hunks.md` covers the full PR diff either way.
+- **Carried findings.** Copy every kept finding from `PREV_ROUND_DIR/final.md`, except related-PR ones, into `findings/carried/<n>.md`, with `file` and `lines` moved to where that code sits at this head (keep the old location if the code is gone) and `carried_from: PREV_ROUND_DIR/verified/<id>.md` added to the frontmatter; then write `findings/carried/_done.md`. Each is verified again this round, so a carried finding never skips a round. Related-PR findings are judged afresh from this round's `related-prs.md` instead.
+- **Review.** Say which carried findings still hold and which the new pushes fixed (those come back refuted with evidence starting `Fixed at`).

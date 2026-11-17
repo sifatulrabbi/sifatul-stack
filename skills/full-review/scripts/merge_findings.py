@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import pathlib
+import re
 import sys
 
 SKILL_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -48,7 +49,10 @@ def parse_lines(value):
     if not value:
         return [0, 0]
     start, _, end = value.partition("-")
-    return [int(start), int(end or start)]
+    try:
+        return [int(start), int(end or start)]
+    except ValueError:
+        raise Malformed("lines must be start-end or a single line") from None
 
 
 def load_findings(round_dir):
@@ -62,6 +66,7 @@ def load_findings(round_dir):
             rel = path.relative_to(round_dir)
             try:
                 meta, title, sections = read_md(path)
+                lines = parse_lines(meta.get("lines", ""))
             except Malformed as e:
                 errors.append(f"{rel}: {e}")
                 continue
@@ -77,7 +82,7 @@ def load_findings(round_dir):
                     "category": job_dir.name,
                     "path": path,
                     "file": meta.get("file", ""),
-                    "lines": parse_lines(meta.get("lines", "")),
+                    "lines": lines,
                     "severity": meta["severity"],
                     "title": title,
                     "sections": sections,
@@ -98,7 +103,7 @@ def overlaps(a, b, slack=3):
 
 def cluster(findings):
     ordered = sorted(findings, key=lambda f: (SEV[f["severity"]], f["file"], f["lines"][0]))
-    clusters, folded = [], []
+    clusters = []
     for f in ordered:
         home = next(
             (c for c in clusters if c["file"] == f["file"] and overlaps(c["lines"], f["lines"])),
@@ -107,17 +112,10 @@ def cluster(findings):
         if home is None:
             clusters.append({"file": f["file"], "lines": list(f["lines"]), "members": [f]})
             continue
-        primary = next(
-            (k for k in home["members"] if k["category"] == f["category"] and overlaps(k["lines"], f["lines"])),
-            None,
-        )
-        if primary:
-            folded.append((f, primary))
-            continue
         home["members"].append(f)
         home["lines"] = [min(home["lines"][0], f["lines"][0]), max(home["lines"][1], f["lines"][1])]
     clusters.sort(key=lambda c: (c["file"], c["lines"][0]))
-    return clusters, folded
+    return clusters
 
 
 def batches(clusters, size):
@@ -130,6 +128,10 @@ def batches(clusters, size):
     if current:
         out.append(current)
     return out
+
+
+def cell(text):
+    return str(text).replace("|", "\\|")
 
 
 def location(file, lines):
@@ -152,8 +154,6 @@ def write_job(round_dir, name, clusters, review_tree, worktree_base):
         f"Output: {round_dir}/verified/<id>.md, one file per finding",
         "",
         "## Findings",
-        "",
-        "Findings under one heading overlap: if two describe the same issue, keep the better one and mark the other duplicate.",
     ]
     for c in clusters:
         lines += ["", f"### {location(c['file'], c['lines'])}", ""]
@@ -165,11 +165,15 @@ def merge(round_dir, review_tree, worktree_base, batch_size):
     findings, errors = load_findings(round_dir)
     if errors:
         fail(errors)
-    clusters, folded = cluster(findings)
+    pending = [f for f in findings if not (round_dir / "verified" / f"{f['id']}.md").exists()]
+    clusters = cluster(pending)
     planned = batches(clusters, batch_size)
-    for n, group in enumerate(planned, 1):
+    jobs_dir = round_dir / "jobs"
+    jobs_dir.mkdir(exist_ok=True)
+    last = max((int(m.group(1)) for p in jobs_dir.glob("verify-*.md") if (m := re.fullmatch(r"verify-(\d+)", p.stem))), default=0)
+    for n, group in enumerate(planned, last + 1):
         write_job(round_dir, f"verify-{n}", group, review_tree, worktree_base)
-    print(f"{len(findings)} findings, {len(folded)} folded as duplicates, {len(clusters)} clusters, {len(planned)} verifier jobs")
+    print(f"{len(findings)} findings, {len(findings) - len(pending)} already verified, {len(clusters)} clusters, {len(planned)} verifier jobs")
 
 
 def verdict_of(round_dir, f):
@@ -185,6 +189,7 @@ def verdict_of(round_dir, f):
         "status": meta.get("status", ""),
         "severity": meta.get("severity") if meta.get("severity") in SEV else f["severity"],
         "duplicate_of": meta.get("duplicate_of", ""),
+        "alternative": meta.get("alternative", ""),
         "reason": evidence.splitlines()[0] if evidence else "",
     }
 
@@ -193,7 +198,7 @@ def final(round_dir):
     findings, errors = load_findings(round_dir)
     if errors:
         fail(errors)
-    clusters, folded = cluster(findings)
+    clusters = cluster(findings)
     verdicts = {}
     for c in clusters:
         for f in c["members"]:
@@ -214,7 +219,6 @@ def final(round_dir):
             else:
                 reason = f"duplicate of {v['duplicate_of']}" if v["status"] == "duplicate" and v["duplicate_of"] else v["reason"]
                 dropped.append((v["status"], f, reason))
-    dropped += [("duplicate", f, f"folded into {primary['id']}") for f, primary in folded]
     kept.sort(key=lambda fv: (SEV[fv[1]["severity"]], fv[1]["status"] != "confirmed", fv[0]["file"], fv[0]["lines"][0]))
     out = [
         "---",
@@ -232,8 +236,8 @@ def final(round_dir):
     ]
     for f, v in kept:
         files = f"{f['path'].relative_to(round_dir)} · {v['path'].relative_to(round_dir)}"
-        out.append(f"| {v['severity']} | {v['status']} | {f['title']} | {location(f['file'], f['lines'])} | {files} |")
-    alternatives = [(f, f["sections"]["Alternative"]) for f, _ in kept if f["sections"].get("Alternative")]
+        out.append(f"| {v['severity']} | {v['status']} | {cell(f['title'])} | {cell(location(f['file'], f['lines']))} | {cell(files)} |")
+    alternatives = [(f, f["sections"]["Alternative"]) for f, v in kept if f["sections"].get("Alternative") and v["alternative"] != "drop"]
     if alternatives:
         out += ["", "## Alternative directions"]
         for f, text in alternatives:
@@ -246,7 +250,7 @@ def final(round_dir):
         "| --- | --- | --- | --- |",
     ]
     for status, f, reason in dropped:
-        out.append(f"| {status} | {f['title']} | {location(f['file'], f['lines'])} | {reason} |")
+        out.append(f"| {status} | {cell(f['title'])} | {cell(location(f['file'], f['lines']))} | {cell(reason)} |")
     out += [
         "",
         "## Unverified",
@@ -255,7 +259,7 @@ def final(round_dir):
         "| --- | --- | --- | --- |",
     ]
     for f in sorted(unverified, key=lambda f: (SEV[f["severity"]], f["file"], f["lines"][0])):
-        out.append(f"| {f['severity']} | {f['title']} | {location(f['file'], f['lines'])} | {f['path'].relative_to(round_dir)} |")
+        out.append(f"| {f['severity']} | {cell(f['title'])} | {cell(location(f['file'], f['lines']))} | {cell(f['path'].relative_to(round_dir))} |")
     (round_dir / "final.md").write_text("\n".join(out) + "\n")
 
 
