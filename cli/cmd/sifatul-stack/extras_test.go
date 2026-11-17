@@ -194,3 +194,19 @@ func TestStatusListsTheChosenExtras(t *testing.T) {
 		t.Errorf("status:\n%s", out)
 	}
 }
+
+func TestInstallRemovesADroppedCloneEvenWhenAnExtraSkillFails(t *testing.T) {
+	f := newFixture(t)
+	up := newExtraUpstream(t, "skills/tdd")
+	f.publishExtras(map[string]manifestEntry{"mp": {Repo: up, Skills: []string{"tdd"}}, "bad": {Repo: up, Skills: []string{"absent"}}})
+	f.mustRun("install", "--harness", "claude", "--extras", "mp")
+
+	out, code := f.run("install", "--extras", "bad")
+
+	if code == 0 {
+		t.Errorf("a missing extra skill should fail the install:\n%s", out)
+	}
+	if _, err := os.Stat(f.extraClone("mp")); err == nil {
+		t.Error("dropped clone kept")
+	}
+}
