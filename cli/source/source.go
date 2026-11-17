@@ -15,7 +15,8 @@ import (
 const DefaultURL = "https://github.com/sifatulrabbi/sifatul-stack"
 
 var (
-	ErrDirty        = errors.New("the sifatul-stack clone has local changes; commit, stash, or discard them first")
+	ErrDirty        = errors.New("the clone has local changes; commit, stash, or discard them first")
+	ErrLocalWork    = errors.New("the clone holds local work that a re-clone would delete; push or discard it first")
 	ErrNotInstalled = errors.New("sifatul-stack is not installed; run `sifatul-stack install` first")
 )
 
@@ -36,9 +37,10 @@ func ExecGit(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 type Repo struct {
-	Dir string
-	URL string
-	Git Git
+	Dir    string
+	URL    string
+	Branch string
+	Git    Git
 }
 
 func (r Repo) Ensure(ctx context.Context) (cloned bool, err error) {
@@ -58,23 +60,39 @@ func (r Repo) Ensure(ctx context.Context) (cloned bool, err error) {
 }
 
 func (r Repo) clone(ctx context.Context) error {
-	if err := os.MkdirAll(filepath.Dir(r.Dir), 0o755); err != nil {
+	parent := filepath.Dir(r.Dir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.MkdirTemp(filepath.Dir(r.Dir), "."+filepath.Base(r.Dir)+".clone-*")
+	tmp, err := os.MkdirTemp(parent, "."+filepath.Base(r.Dir)+".clone-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	if _, err := r.Git(ctx, "clone", "--quiet", r.URL, tmp); err != nil {
+	args := []string{"clone", "--quiet"}
+	if r.Branch != "" {
+		args = append(args, "--branch", r.Branch)
+	}
+	if _, err := r.Git(ctx, append(args, "--", r.URL, tmp)...); err != nil {
 		return err
+	}
+	if _, err := os.Lstat(r.Dir); err == nil {
+		old, err := os.MkdirTemp(parent, "."+filepath.Base(r.Dir)+".old-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(old)
+		if err := os.Rename(r.Dir, filepath.Join(old, "clone")); err != nil {
+			return err
+		}
 	}
 	return os.Rename(tmp, r.Dir)
 }
 
 type Change struct {
-	From string
-	To   string
+	From   string
+	To     string
+	Cloned bool
 }
 
 func (c Change) Updated() bool { return c.From != c.To }
@@ -98,6 +116,65 @@ func (r Repo) Pull(ctx context.Context) (Change, error) {
 	return Change{From: from, To: to}, err
 }
 
+func (r Repo) Sync(ctx context.Context) (Change, error) {
+	cloned, err := r.Ensure(ctx)
+	if err != nil {
+		return Change{}, err
+	}
+	if !cloned {
+		tracks, err := r.Tracks(ctx)
+		if err != nil {
+			return Change{}, err
+		}
+		if tracks {
+			return r.Pull(ctx)
+		}
+		if err := r.reclone(ctx); err != nil {
+			return Change{}, err
+		}
+	}
+	to, err := r.head(ctx)
+	return Change{To: to, Cloned: true}, err
+}
+
+func (r Repo) reclone(ctx context.Context) error {
+	status, err := r.git(ctx, "status", "--porcelain")
+	if err != nil {
+		return err
+	}
+	unpushed, err := r.git(ctx, "log", "--oneline", "--exclude=refs/tags/*", "--all", "--not", "--remotes")
+	if err != nil {
+		return err
+	}
+	if len(strings.TrimSpace(string(status)+string(unpushed))) > 0 {
+		return fmt.Errorf("%s must be re-cloned from %s: %w", r.Dir, r.URL, ErrLocalWork)
+	}
+	return r.clone(ctx)
+}
+
+func (r Repo) Tracks(ctx context.Context) (bool, error) {
+	url, err := r.git(ctx, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(string(url)) != r.URL {
+		return false, nil
+	}
+	want := r.Branch
+	if want == "" {
+		out, err := r.git(ctx, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+		if err != nil {
+			return false, err
+		}
+		want = strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
+	}
+	head, err := r.git(ctx, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(head)) == want, nil
+}
+
 func (r Repo) head(ctx context.Context) (string, error) {
 	out, err := r.git(ctx, "rev-parse", "--short", "HEAD")
 	return strings.TrimSpace(string(out)), err
@@ -112,6 +189,7 @@ type State struct {
 	Managed   bool     `json:"managed"`
 	Harnesses []string `json:"harnesses,omitempty"`
 	Agents    []string `json:"agents,omitempty"`
+	Extras    []string `json:"extras,omitempty"`
 }
 
 func LoadState(path string) (State, error) {

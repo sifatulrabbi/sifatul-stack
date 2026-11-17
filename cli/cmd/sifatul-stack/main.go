@@ -73,10 +73,10 @@ func defaultApp() app {
 	animate := term.IsTerminal(os.Stdout.Fd()) && os.Getenv("TERM") != "dumb"
 	cols, _, _ := term.GetSize(os.Stdout.Fd())
 	layout := stack.LayoutFromEnv(home, os.Getenv)
-	var choose func(context.Context, []ui.Choice) ([]string, error)
+	var choose func(context.Context, ui.Pick) ([]string, error)
 	if animate && term.IsTerminal(os.Stdin.Fd()) {
-		choose = func(ctx context.Context, choices []ui.Choice) ([]string, error) {
-			return ui.Choose(ctx, os.Stdin, os.Stdout, "Install sifatul-stack into which harnesses?", choices)
+		choose = func(ctx context.Context, p ui.Pick) ([]string, error) {
+			return ui.Choose(ctx, os.Stdin, os.Stdout, p)
 		}
 	}
 
