@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v3"
@@ -28,15 +27,12 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-func fixedNow() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) }
-
 func newSyncer(t *testing.T, source string) stack.Syncer {
 	t.Helper()
 	home := t.TempDir()
 	return stack.Syncer{
 		Source: source,
 		Layout: stack.LayoutFromEnv(home, func(string) string { return "" }),
-		Now:    fixedNow,
 	}
 }
 
@@ -77,6 +73,16 @@ func assertLinksTo(t *testing.T, link, target string) {
 	}
 	if got != target {
 		t.Errorf("%s -> %s, want %s", link, got, target)
+	}
+}
+
+func assertNoBackups(t *testing.T, dir string) {
+	t.Helper()
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "backup") {
+			t.Errorf("%s holds a backup %s", dir, e.Name())
+		}
 	}
 }
 
@@ -127,8 +133,8 @@ func TestLinkFreshHome(t *testing.T) {
 	l := s.Layout
 	write(t, filepath.Join(l.Claude, "CLAUDE.md"), "old global\n")
 
-	if r := run(t, s, stack.Link); r.Conflicts() != 0 {
-		t.Fatalf("conflicts on a fresh home: %+v", r.Rows)
+	if r := run(t, s, stack.Link); r.Failures() != 0 {
+		t.Fatalf("failures on a fresh home: %+v", r.Rows)
 	}
 
 	skills, _ := filepath.Glob(filepath.Join(root, "skills", "*", "SKILL.md"))
@@ -145,9 +151,7 @@ func TestLinkFreshHome(t *testing.T) {
 	assertLinksTo(t, filepath.Join(l.Claude, "CLAUDE.md"), instructions)
 	assertLinksTo(t, filepath.Join(l.Codex, "AGENTS.md"), instructions)
 	assertLinksTo(t, filepath.Join(l.OpenCode, "AGENTS.md"), instructions)
-	if got := read(t, filepath.Join(l.Claude, "CLAUDE.md.sifatul-stack-backup-20261116120000")); got != "old global\n" {
-		t.Errorf("backup = %q", got)
-	}
+	assertNoBackups(t, l.Claude)
 
 	for _, tier := range tiers {
 		claude := filepath.Join(l.Claude, "agents", tier+".md")
@@ -189,8 +193,8 @@ func TestLinkFreshHome(t *testing.T) {
 	}
 
 	again := run(t, s, stack.Link)
-	if again.Conflicts() != 0 {
-		t.Fatalf("second link has conflicts: %+v", again.Rows)
+	if again.Failures() != 0 {
+		t.Fatalf("second link has failures: %+v", again.Rows)
 	}
 	for _, row := range again.Rows {
 		if row.State != stack.Linked && row.State != stack.Current {
@@ -241,39 +245,101 @@ func TestStaleAgentIsRerendered(t *testing.T) {
 	}
 }
 
-func TestConflictsAreLeftAlone(t *testing.T) {
-	s := newSyncer(t, repoRoot(t))
-	l := s.Layout
-	foreignSkill := filepath.Join(l.AgentsSkills, "full-review", "SKILL.md")
-	foreignAgent := filepath.Join(l.Claude, "agents", "associate.md")
-	write(t, foreignSkill, "mine\n")
-	write(t, foreignAgent, "my own associate agent\n")
+func plantFile(t *testing.T, path string) { write(t, path, "mine\n") }
 
-	r := run(t, s, stack.Link)
+func plantDir(t *testing.T, path string) { write(t, filepath.Join(path, "inside"), "mine\n") }
 
-	if r.Conflicts() != 1 {
-		t.Errorf("conflicts = %d, want 1: %+v", r.Conflicts(), r.Rows)
+func plantSymlink(t *testing.T, path string) {
+	t.Helper()
+	target := filepath.Join(t.TempDir(), "theirs")
+	write(t, target, "theirs\n")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if read(t, foreignSkill) != "mine\n" {
-		t.Error("a foreign file was changed")
-	}
-	if fm := frontmatter(t, foreignAgent); fm["name"] != "associate" {
-		t.Errorf("the agent path was not rendered: %v", fm)
-	}
-	if fm := frontmatter(t, filepath.Join(l.Claude, "agents", "senior.md")); fm["name"] != "senior" {
-		t.Error("non-conflicting agents were not installed")
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestUnlinkRestoresHome(t *testing.T) {
+var plants = map[string]func(*testing.T, string){"file": plantFile, "dir": plantDir, "symlink": plantSymlink}
+
+func TestLinkReplacesWhateverSitsAtALinkPath(t *testing.T) {
+	for what, plant := range plants {
+		for _, at := range []struct{ key, path, src string }{
+			{"skill full-review claude", ".claude/skills/full-review", "skills/full-review"},
+			{"skill full-review agents", ".agents/skills/full-review", "skills/full-review"},
+			{"instructions AGENTS.md claude", ".claude/CLAUDE.md", "instructions/AGENTS.md"},
+			{"instructions AGENTS.md codex", ".codex/AGENTS.md", "instructions/AGENTS.md"},
+		} {
+			t.Run(what+" at "+at.path, func(t *testing.T) {
+				src := fixtureSource(t, "full-review")
+				home := t.TempDir()
+				s := stack.Syncer{Source: src, Layout: stack.LayoutFromEnv(home, func(string) string { return "" })}
+				dst := filepath.Join(home, at.path)
+				plant(t, dst)
+				symlinkTarget, _ := os.Readlink(dst)
+
+				if st := states(run(t, s, stack.Status)); st[at.key] != "stale" {
+					t.Errorf("status = %q, want stale", st[at.key])
+				}
+				if _, err := os.Lstat(dst); err != nil || isLink(dst, filepath.Join(src, at.src)) {
+					t.Fatal("status changed the path")
+				}
+				r := run(t, s, stack.Link)
+
+				assertLinksTo(t, dst, filepath.Join(src, at.src))
+				if got := changes(r)[at.key]; got != "replaced" {
+					t.Errorf("change = %q, want replaced", got)
+				}
+				if r.Failures() != 0 {
+					t.Errorf("failures: %+v", r.Rows)
+				}
+				if symlinkTarget != "" && read(t, symlinkTarget) != "theirs\n" {
+					t.Error("replacing a symlink changed its target")
+				}
+				assertNoBackups(t, filepath.Dir(dst))
+			})
+		}
+	}
+}
+
+func isLink(path, target string) bool {
+	got, err := os.Readlink(path)
+	return err == nil && got == target
+}
+
+func TestUnwritableAgentDirIsAFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes everywhere")
+	}
+	s := newSyncer(t, fixtureSource(t))
+	dir := filepath.Join(s.Layout.Codex, "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+
+	r := run(t, s, stack.Link)
+
+	if r.Failures() != len(tiers) {
+		t.Errorf("failures = %d, want %d: %+v", r.Failures(), len(tiers), r.Rows)
+	}
+	if st := states(r); st["agent senior codex"] != "failed" || st["agent senior claude"] != "written" {
+		t.Errorf("states = %v", st)
+	}
+}
+func TestUnlinkRemovesWhatItOwnsAndRestoresNothing(t *testing.T) {
 	s := newSyncer(t, repoRoot(t))
 	l := s.Layout
 	write(t, filepath.Join(l.Claude, "CLAUDE.md"), "old global\n")
 	write(t, filepath.Join(l.Claude, "agents", "mine.md"), "keep me\n")
 	run(t, s, stack.Link)
 
-	if r := run(t, s, stack.Unlink); r.Conflicts() != 0 {
-		t.Errorf("unlink conflicts: %+v", r.Rows)
+	if r := run(t, s, stack.Unlink); r.Failures() != 0 {
+		t.Errorf("unlink failures: %+v", r.Rows)
 	}
 
 	assertMissing(t, filepath.Join(l.Claude, "skills", "full-review"))
@@ -285,10 +351,8 @@ func TestUnlinkRestoresHome(t *testing.T) {
 	if read(t, filepath.Join(l.Claude, "agents", "mine.md")) != "keep me\n" {
 		t.Error("unmanaged agent was changed")
 	}
-	claudeMD := filepath.Join(l.Claude, "CLAUDE.md")
-	if fi, err := os.Lstat(claudeMD); err != nil || fi.Mode()&os.ModeSymlink != 0 || read(t, claudeMD) != "old global\n" {
-		t.Error("CLAUDE.md was not restored from its backup")
-	}
+	assertMissing(t, filepath.Join(l.Claude, "CLAUDE.md"))
+	assertNoBackups(t, l.Claude)
 }
 
 func fixtureSource(t *testing.T, skills ...string) string {
@@ -606,8 +670,8 @@ func TestRowsSayWhatThisRunChanged(t *testing.T) {
 	if got["skill keep claude"] != "linked" || got["agent senior codex"] != "written" || got["instructions AGENTS.md codex"] != "linked" {
 		t.Errorf("fresh link changes = %v", got)
 	}
-	if !slices.ContainsFunc(first.Rows, func(r stack.Row) bool { return r.Change == stack.DidBackUp && r.Harness == "claude" }) {
-		t.Errorf("no backed-up row for claude: %+v", first.Rows)
+	if got["instructions AGENTS.md claude"] != "replaced" {
+		t.Errorf("claude instructions change = %q, want replaced", got["instructions AGENTS.md claude"])
 	}
 
 	if got := changes(run(t, s, stack.Link)); len(got) != 0 {
@@ -628,7 +692,7 @@ func TestRowsSayWhatThisRunChanged(t *testing.T) {
 	}
 
 	got = changes(run(t, s, stack.Unlink))
-	if got["skill keep claude"] != "removed" || got["agent senior opencode"] != "removed" || got["instructions AGENTS.md claude"] != "restored" || got["instructions AGENTS.md codex"] != "removed" {
+	if got["skill keep claude"] != "removed" || got["agent senior opencode"] != "removed" || got["instructions AGENTS.md claude"] != "removed" || got["instructions AGENTS.md codex"] != "removed" {
 		t.Errorf("unlink changes = %v", got)
 	}
 }
@@ -682,9 +746,7 @@ func TestDeselectedHarnessIsRemovedOnLink(t *testing.T) {
 	s.Selected = []string{"claude", "opencode"}
 	r := run(t, s, stack.Link)
 
-	if read(t, codexMD) != "old codex global\n" {
-		t.Error("codex AGENTS.md backup was not restored")
-	}
+	assertMissing(t, codexMD)
 	assertMissing(t, filepath.Join(l.Codex, "agents", "senior.toml"))
 	assertLinksTo(t, filepath.Join(l.AgentsSkills, "full-review"), filepath.Join(s.Source, "skills", "full-review"))
 	if got := changes(r)["agent senior codex"]; got != "removed" {
@@ -757,8 +819,8 @@ func TestLinkReplacesAnUnreadableAgent(t *testing.T) {
 	if fm := frontmatter(t, foreign); fm["name"] != "senior" {
 		t.Errorf("senior.md = %v", fm)
 	}
-	if r.Conflicts() != 0 {
-		t.Errorf("conflicts = %d, want 0: %+v", r.Conflicts(), r.Rows)
+	if r.Failures() != 0 {
+		t.Errorf("failures = %d, want 0: %+v", r.Failures(), r.Rows)
 	}
 }
 
@@ -771,8 +833,8 @@ func TestUnlinkWorksAfterTheSourceIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if r := run(t, s, stack.Unlink); r.Conflicts() != 0 {
-		t.Errorf("unlink conflicts: %+v", r.Rows)
+	if r := run(t, s, stack.Unlink); r.Failures() != 0 {
+		t.Errorf("unlink failures: %+v", r.Rows)
 	}
 
 	for _, p := range []string{
@@ -802,50 +864,6 @@ func TestOpenCodeChoiceSurvivesDetachThenLink(t *testing.T) {
 		t.Error("senior was switched back off after a source switch")
 	}
 	assertLinksTo(t, filepath.Join(s.Layout.Claude, "skills", "keep"), filepath.Join(s.Source, "skills", "keep"))
-}
-
-func TestUnlinkRestoresTheNewestBackupItMade(t *testing.T) {
-	s := newSyncer(t, fixtureSource(t))
-	claudeMD := filepath.Join(s.Layout.Claude, "CLAUDE.md")
-	write(t, claudeMD+".sifatul-stack-backup-20260101000000", "older\n")
-	write(t, claudeMD, "newest\n")
-	run(t, s, stack.Link)
-	write(t, claudeMD+".sifatul-stack-backup-old", "not ours\n")
-
-	run(t, s, stack.Unlink)
-
-	if got := read(t, claudeMD); got != "newest\n" {
-		t.Errorf("CLAUDE.md = %q, want the newest backup setup made", got)
-	}
-	if got := read(t, claudeMD+".sifatul-stack-backup-old"); got != "not ours\n" {
-		t.Errorf("foreign backup changed: %q", got)
-	}
-	if got := read(t, claudeMD+".sifatul-stack-backup-20260101000000"); got != "older\n" {
-		t.Errorf("older backup changed: %q", got)
-	}
-}
-
-func TestUnlinkLeavesBackupsItNeverMadeAlone(t *testing.T) {
-	for _, name := range []string{
-		"CLAUDE.md.backup-old",
-		"CLAUDE.md.backup-20250101000000",
-		"CLAUDE.md.sifatul-stack-backup-old",
-		"CLAUDE.md.sifatul-stack-backup-99999999999999",
-	} {
-		t.Run(name, func(t *testing.T) {
-			s := newSyncer(t, fixtureSource(t))
-			backup := filepath.Join(s.Layout.Claude, name)
-			write(t, backup, "other tool\n")
-			run(t, s, stack.Link)
-
-			run(t, s, stack.Unlink)
-
-			assertMissing(t, filepath.Join(s.Layout.Claude, "CLAUDE.md"))
-			if got := read(t, backup); got != "other tool\n" {
-				t.Errorf("backup changed: %q", got)
-			}
-		})
-	}
 }
 
 func TestRunRefusesAnUnknownHarness(t *testing.T) {

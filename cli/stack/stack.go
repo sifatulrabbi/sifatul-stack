@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 )
 
 type Mode string
@@ -54,9 +53,7 @@ const (
 	Orphaned State = "orphaned"
 	Removed  State = "removed"
 	Pruned   State = "pruned"
-	Restored State = "restored"
-	BackedUp State = "backed up"
-	Conflict State = "conflict"
+	Failed   State = "failed"
 )
 
 type Change string
@@ -65,8 +62,7 @@ const (
 	DidLink     Change = "linked"
 	DidWrite    Change = "written"
 	DidRerender Change = "re-rendered"
-	DidBackUp   Change = "backed up"
-	DidRestore  Change = "restored"
+	DidReplace  Change = "replaced"
 	DidPrune    Change = "pruned"
 	DidRemove   Change = "removed"
 )
@@ -86,10 +82,10 @@ type Report struct {
 	Agents []string
 }
 
-func (r Report) Conflicts() int {
+func (r Report) Failures() int {
 	n := 0
 	for _, row := range r.Rows {
-		if row.State == Conflict {
+		if row.State == Failed {
 			n++
 		}
 	}
@@ -99,7 +95,6 @@ func (r Report) Conflicts() int {
 type Syncer struct {
 	Source   string
 	Layout   Layout
-	Now      func() time.Time
 	Selected []string
 	Owned    []string
 }
@@ -168,7 +163,7 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 
 	for _, h := range table {
 		if x := r.on(h.Key); x != nil {
-			x.linkInstructions(h.Key, h.instructionsPath(s.Layout))
+			x.linkPath("instructions", "AGENTS.md", h.Key, filepath.Join(s.Source, "instructions", "AGENTS.md"), h.instructionsPath(s.Layout))
 		}
 	}
 
@@ -230,12 +225,8 @@ func (r *run) did(kind, name, harness string, state State, change Change, detail
 	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: state, Change: change, Detail: detail})
 }
 
-func (r *run) conflict(kind, name, harness, why string) {
-	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: Conflict, Detail: why})
-}
-
 func (r *run) fail(kind, name, harness string, err error) {
-	r.conflict(kind, name, harness, err.Error())
+	r.report.Rows = append(r.report.Rows, Row{Kind: kind, Name: name, Harness: harness, State: Failed, Detail: err.Error()})
 }
 
 func isLinkTo(path, target string) bool {
@@ -261,23 +252,34 @@ func (r *run) linkPath(kind, name, harness, src, dst string) {
 		r.did(kind, name, harness, Removed, DidRemove, "")
 		return
 	}
+	present := exists(dst)
 	switch {
 	case r.mode.releases():
-	case exists(dst):
-		r.conflict(kind, name, harness, dst+" exists")
+	case r.mode == Status && present:
+		r.did(kind, name, harness, Stale, "", dst)
 	case r.mode == Status:
 		r.row(kind, name, harness, Missing)
 	default:
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		if err := replaceWithLink(src, dst); err != nil {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		if err := os.Symlink(src, dst); err != nil {
-			r.fail(kind, name, harness, err)
+		if present {
+			r.did(kind, name, harness, Linked, DidReplace, "")
 			return
 		}
 		r.did(kind, name, harness, Linked, DidLink, "")
 	}
+}
+
+func replaceWithLink(src, dst string) error {
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(src, dst)
 }
 
 func (r *run) pruneSkills(harness, dir string, current []string) {
@@ -314,62 +316,6 @@ func (r *run) retire(kind, name, harness, path string, statusState State) {
 		}
 		r.did(kind, name, harness, Pruned, DidPrune, "")
 	}
-}
-
-func (r *run) linkInstructions(harness, dst string) {
-	src := filepath.Join(r.Source, "instructions", "AGENTS.md")
-	const kind, name = "instructions", "AGENTS.md"
-	if r.mode.releases() {
-		if !isLinkTo(dst, src) {
-			return
-		}
-		if err := os.Remove(dst); err != nil {
-			r.fail(kind, name, harness, err)
-			return
-		}
-		newest := newestBackup(dst)
-		if newest == "" {
-			r.did(kind, name, harness, Removed, DidRemove, "")
-			return
-		}
-		if err := os.Rename(newest, dst); err != nil {
-			r.fail(kind, name, harness, err)
-			return
-		}
-		r.did(kind, name, harness, Restored, DidRestore, filepath.Base(newest))
-		return
-	}
-	if fi, err := os.Lstat(dst); err == nil && fi.Mode().IsRegular() {
-		if r.mode == Status {
-			r.did(kind, name, harness, Missing, "", dst)
-			return
-		}
-		backup := dst + backupInfix + r.Now().Format(backupStamp)
-		if err := os.Rename(dst, backup); err != nil {
-			r.fail(kind, name, harness, err)
-			return
-		}
-		r.did(kind, name, harness, BackedUp, DidBackUp, filepath.Base(backup))
-	}
-	r.linkPath(kind, name, harness, src, dst)
-}
-
-const (
-	backupInfix = ".sifatul-stack-backup-"
-	backupStamp = "20060102150405"
-)
-
-func newestBackup(dst string) string {
-	entries, _ := os.ReadDir(filepath.Dir(dst))
-	newest, at := "", time.Time{}
-	for _, e := range entries {
-		stamp, ok := strings.CutPrefix(e.Name(), filepath.Base(dst)+backupInfix)
-		t, err := time.Parse(backupStamp, stamp)
-		if ok && err == nil && (newest == "" || t.After(at)) {
-			newest, at = filepath.Join(filepath.Dir(dst), e.Name()), t
-		}
-	}
-	return newest
 }
 
 func readAgent(path string) (raw string, regular bool) {

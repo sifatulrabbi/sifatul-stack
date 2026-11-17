@@ -22,8 +22,7 @@ var changeOrder = []struct {
 	{stack.DidLink, "+", "new"},
 	{stack.DidWrite, "+", "new"},
 	{stack.DidRerender, "~", "re-rendered"},
-	{stack.DidBackUp, "•", "backed up"},
-	{stack.DidRestore, "•", "restored"},
+	{stack.DidReplace, "~", "replaced"},
 	{stack.DidPrune, "−", "pruned"},
 	{stack.DidRemove, "−", "removed"},
 }
@@ -43,10 +42,10 @@ func StackSummary(rows []stack.Row) string {
 	rows = safeRows(rows)
 	var table [][]string
 	for _, k := range kinds {
-		ofKind := filterRows(rows, func(r stack.Row) bool { return r.Kind == k.kind && r.State != stack.Conflict })
+		ofKind := filterRows(rows, func(r stack.Row) bool { return r.Kind == k.kind && r.State != stack.Failed })
 		var lines []string
 		if live := filterRows(ofKind, func(r stack.Row) bool {
-			return !slices.Contains([]stack.Change{stack.DidRemove, stack.DidPrune, stack.DidRestore}, r.Change)
+			return !slices.Contains([]stack.Change{stack.DidRemove, stack.DidPrune}, r.Change)
 		}); len(live) > 0 {
 			l := ui.OK.Render("✓") + " "
 			if k.kind != "instructions" {
@@ -79,7 +78,7 @@ func StackSummary(rows []stack.Row) string {
 			table = append(table, []string{title, l})
 		}
 	}
-	return ui.Columns(table, "  ") + conflicts(rows)
+	return ui.Columns(table, "  ") + failures(rows)
 }
 
 func StackStatus(rows []stack.Row) string {
@@ -116,7 +115,7 @@ func StackStatus(rows []stack.Row) string {
 		}
 	}
 	out := ui.Columns(table, "   ")
-	if c := conflicts(rows); c != "" {
+	if c := failures(rows); c != "" {
 		out += "\n" + c
 	}
 	if needsUpdate {
@@ -127,8 +126,8 @@ func StackStatus(rows []stack.Row) string {
 
 func cell(r stack.Row) (string, bool) {
 	switch {
-	case r.State == stack.Conflict:
-		return ui.Bad.Render("! conflict"), false
+	case r.State == stack.Failed:
+		return ui.Bad.Render("! failed"), false
 	case r.State == stack.Missing:
 		return ui.Bad.Render("✗ missing"), true
 	case r.State == stack.Stale:
@@ -144,20 +143,16 @@ func cell(r stack.Row) (string, bool) {
 	}
 }
 
-func conflicts(rows []stack.Row) string {
-	bad := filterRows(rows, func(r stack.Row) bool { return r.State == stack.Conflict })
+func failures(rows []stack.Row) string {
+	bad := filterRows(rows, func(r stack.Row) bool { return r.State == stack.Failed })
 	if len(bad) == 0 {
 		return ""
-	}
-	noun := "conflict"
-	if len(bad) > 1 {
-		noun += "s"
 	}
 	var table [][]string
 	for _, r := range bad {
 		table = append(table, []string{"  " + r.Kind + " " + r.Name + ui.Muted.Render(" · "+harnessOf(r)), r.Detail})
 	}
-	return ui.Bad.Render(fmt.Sprintf("! %d %s, left alone", len(bad), noun)) + "\n" + ui.Columns(table, "  ")
+	return ui.Bad.Render(fmt.Sprintf("! %d failed", len(bad))) + "\n" + ui.Columns(table, "  ")
 }
 
 func changedItems(kind string, all, changed []stack.Row) string {

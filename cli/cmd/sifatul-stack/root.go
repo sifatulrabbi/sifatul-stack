@@ -40,7 +40,7 @@ func exitCode(err error) int {
 		return 0
 	case errors.As(err, &exit):
 		return exit.code
-	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput), errors.Is(err, errConflicts):
+	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput), errors.Is(err, errFailed):
 		return 1
 	default:
 		return 2

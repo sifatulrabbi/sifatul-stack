@@ -94,7 +94,6 @@ func defaultApp() app {
 			dataDir: filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(home, ".local", "share")), "sifatul-stack"),
 			repoURL: envOr("SIFATUL_STACK_REPO", source.DefaultURL),
 			git:     source.ExecGit,
-			now:     time.Now,
 			animate: animate,
 			home:    home,
 			choose:  choose,

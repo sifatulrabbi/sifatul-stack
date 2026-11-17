@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -21,16 +20,13 @@ import (
 
 const brand = "sifatul-stack"
 
-var (
-	errConflicts = errors.New("resolve the conflicts above and rerun")
-)
+var errFailed = errors.New("fix the errors above and rerun")
 
 type stackEnv struct {
 	layout  stack.Layout
 	dataDir string
 	repoURL string
 	git     source.Git
-	now     func() time.Time
 	animate bool
 	home    string
 	choose  func(ctx context.Context, choices []ui.Choice) ([]string, error)
@@ -73,7 +69,7 @@ func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode s
 	if err := ui.Interrupted(ctx); err != nil {
 		return err
 	}
-	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Now: e.now, Selected: st.Harnesses, Owned: st.Agents}.Run(mode)
+	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Selected: st.Harnesses, Owned: st.Agents}.Run(mode)
 	view := render.StackSummary
 	if mode == stack.Status {
 		view = render.StackStatus
@@ -93,8 +89,8 @@ func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode s
 			return failed(err)
 		}
 	}
-	if r.Conflicts() > 0 {
-		return errConflicts
+	if r.Failures() > 0 {
+		return errFailed
 	}
 	return nil
 }
@@ -131,8 +127,8 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 			"Clones sifatul-stack into the data dir (or uses --from), links skills and global instructions, and renders the named sub-agents. " +
 			"In a terminal, setup asks which harnesses to install into; --harness skips the question, and without either it keeps the last choice (all on a first setup). " +
 			"A harness you drop is cleaned up the same way `sifatul-stack remove` would. " +
-			"An existing global instructions file is backed up first as <file>.sifatul-stack-backup-<time>; `sifatul-stack remove` restores the newest such backup. " +
-			"Anything at a target path that sifatul-stack doesn't own is reported as a conflict and left alone.",
+			"Whatever already sits at a target path (a skill link, a global instructions file, a sub-agent file) is replaced without a backup. " +
+			"state.json records the sub-agents it rendered, so a later update or remove knows which agent files are its own.",
 		Example: "  sifatul-stack setup\n  sifatul-stack setup --harness claude,codex\n  sifatul-stack setup --from ~/projects/sifatul-stack",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -282,7 +278,7 @@ func newUpdateCmd(e stackEnv) *cobra.Command {
 func newStatusCmd(e stackEnv) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show what is linked, rendered, stale, or in conflict (read-only)",
+		Short: "Show what is linked, rendered, stale, or failed (read-only)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w := cmd.OutOrStdout()
@@ -311,7 +307,7 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 func newRemoveCmd(e stackEnv) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove",
-		Short: "Remove everything setup created and restore backed-up global instructions",
+		Short: "Remove the links and sub-agent files setup created; nothing is restored",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w := cmd.OutOrStdout()

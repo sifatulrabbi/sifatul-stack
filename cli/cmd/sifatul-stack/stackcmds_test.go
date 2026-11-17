@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sifatulrabbi/sifatul-stack/cli/source"
 	"github.com/sifatulrabbi/sifatul-stack/cli/stack"
@@ -93,7 +92,6 @@ func newFixture(t *testing.T) fixture {
 		dataDir: filepath.Join(home, ".local", "share", "sifatul-stack"),
 		repoURL: up,
 		git:     source.ExecGit,
-		now:     func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) },
 		home:    home,
 	}}
 }
@@ -245,7 +243,17 @@ func TestSetupSwitchesSources(t *testing.T) {
 	}
 }
 
-func TestRemoveRestoresAndForgetsState(t *testing.T) {
+func noBackups(t *testing.T, root string) {
+	t.Helper()
+	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err == nil && strings.Contains(d.Name(), "backup") {
+			t.Errorf("found a backup at %s", path)
+		}
+		return nil
+	})
+}
+
+func TestRemoveForgetsStateAndRestoresNothing(t *testing.T) {
 	f := newFixture(t)
 	claudeMD := filepath.Join(f.env.layout.Claude, "CLAUDE.md")
 	writeFile(t, claudeMD, "old global\n")
@@ -253,9 +261,10 @@ func TestRemoveRestoresAndForgetsState(t *testing.T) {
 
 	f.mustRun("remove")
 
-	if fi, err := os.Lstat(claudeMD); err != nil || fi.Mode()&os.ModeSymlink != 0 || readFile(t, claudeMD) != "old global\n" {
-		t.Error("CLAUDE.md was not restored")
+	if _, err := os.Lstat(claudeMD); err == nil {
+		t.Error("CLAUDE.md is back after remove")
 	}
+	noBackups(t, f.env.home)
 	if _, err := os.Stat(f.env.statePath()); err == nil {
 		t.Error("state survived remove")
 	}
@@ -264,13 +273,84 @@ func TestRemoveRestoresAndForgetsState(t *testing.T) {
 	}
 }
 
-func TestSetupReportsConflictsWithExitOne(t *testing.T) {
+func TestSetupReportsFailuresWithExitOne(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes everywhere")
+	}
 	f := newFixture(t)
-	writeFile(t, filepath.Join(f.env.layout.Claude, "skills", "full-review", "SKILL.md"), "mine\n")
+	dir := filepath.Join(f.env.layout.Claude, "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
 
-	out, code := f.run("setup")
-	if code != 1 || !strings.Contains(out, "! 1 conflict, left alone") || !strings.Contains(out, "skill full-review · Claude Code  ~/.claude/skills/full-review exists") {
+	out, code := f.run("setup", "--harness", "claude")
+	if code != 1 || !strings.Contains(out, "! 4 failed") || !strings.Contains(out, "agent senior · Claude Code") || !strings.Contains(out, "fix the errors above and rerun") {
 		t.Errorf("exit %d:\n%s", code, out)
+	}
+}
+
+func TestSetupReplacesWhateverSitsAtATargetPath(t *testing.T) {
+	plants := map[string]func(t *testing.T, path string){
+		"file": func(t *testing.T, path string) { writeFile(t, path, "mine\n") },
+		"dir":  func(t *testing.T, path string) { writeFile(t, filepath.Join(path, "inside"), "mine\n") },
+		"symlink": func(t *testing.T, path string) {
+			target := filepath.Join(t.TempDir(), "theirs")
+			writeFile(t, target, "theirs\n")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for what, plant := range plants {
+		t.Run(what, func(t *testing.T) {
+			f := newFixture(t)
+			l := f.env.layout
+			skill := filepath.Join(l.Claude, "skills", "full-review")
+			instructions := filepath.Join(l.Codex, "AGENTS.md")
+			agent := filepath.Join(l.OpenCode, "agents", "senior.md")
+			for _, p := range []string{skill, instructions, agent} {
+				plant(t, p)
+			}
+
+			f.mustRun("setup")
+
+			if got := linkTarget(t, skill); got != filepath.Join(f.clone(), "skills", "full-review") {
+				t.Errorf("skill links to %s", got)
+			}
+			if got := linkTarget(t, instructions); got != filepath.Join(f.clone(), "instructions", "AGENTS.md") {
+				t.Errorf("instructions link to %s", got)
+			}
+			if fi, err := os.Lstat(agent); err != nil || !fi.Mode().IsRegular() || !strings.Contains(readFile(t, agent), "mode: subagent") {
+				t.Errorf("senior.md was not rendered over the %s", what)
+			}
+			noBackups(t, f.env.home)
+		})
+	}
+}
+
+func TestStatusReportsAForeignThingWithoutChangingIt(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup")
+	codexMD := filepath.Join(f.env.layout.Codex, "AGENTS.md")
+	if err := os.Remove(codexMD); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, codexMD, "mine\n")
+
+	out := f.mustRun("status")
+
+	if !strings.Contains(out, "~ stale") || !strings.Contains(out, "run `sifatul-stack update`") {
+		t.Errorf("status:\n%s", out)
+	}
+	if readFile(t, codexMD) != "mine\n" {
+		t.Error("status changed the foreign file")
 	}
 }
 

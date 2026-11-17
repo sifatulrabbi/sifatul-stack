@@ -23,13 +23,13 @@ func freshSetup() []stack.Row {
 		rows = append(rows, row("skill", sk, "claude", "linked", "linked"), row("skill", sk, "agents", "linked", "linked"))
 	}
 	rows = append(rows,
-		stack.Row{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.BackedUp, Change: stack.DidBackUp, Detail: "CLAUDE.md.sifatul-stack-backup-20261116120000"},
-		row("instructions", "AGENTS.md", "claude", "linked", "linked"),
-		row("instructions", "AGENTS.md", "codex", "linked", ""),
+		row("instructions", "AGENTS.md", "claude", "linked", "replaced"),
+		row("instructions", "AGENTS.md", "codex", "linked", "linked"),
+		row("instructions", "AGENTS.md", "opencode", "linked", ""),
 		row("agent", "senior", "claude", "current", ""),
 		row("agent", "senior", "codex", "written", "re-rendered"),
 		toggled("senior", false),
-		stack.Row{Kind: "skill", Name: "x", Harness: "claude", State: stack.Conflict, Detail: "/h/.claude/skills/x exists"},
+		stack.Row{Kind: "skill", Name: "x", Harness: "claude", State: stack.Failed, Detail: "symlink /h/.claude/skills/x: permission denied"},
 	)
 	return rows
 }
@@ -48,14 +48,14 @@ func TestStackSummaryGroupsChangesByKind(t *testing.T) {
 	for _, want := range []string{
 		"Skills        ✓ 8 linked into Claude Code, ~/.agents",
 		"+ new  a, b, c, d, e, f, and 2 more",
-		"Instructions  ✓ linked into Claude Code, Codex",
-		"+ new  Claude Code",
-		"• backed up  Claude Code (CLAUDE.md.sifatul-stack-backup-20261116120000)",
+		"Instructions  ✓ linked into Claude Code, Codex, OpenCode",
+		"+ new  Codex",
+		"~ replaced  Claude Code",
 		"Sub-agents    ✓ 1 rendered for Claude Code, Codex, OpenCode",
 		"~ re-rendered  senior (Codex)",
 		"○ 1 off in OpenCode",
-		"! 1 conflict, left alone",
-		"skill x · Claude Code  /h/.claude/skills/x exists",
+		"! 1 failed",
+		"skill x · Claude Code  symlink /h/.claude/skills/x: permission denied",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary lacks %q:\n%s", want, out)
@@ -69,10 +69,10 @@ func TestStackSummaryGroupsChangesByKind(t *testing.T) {
 func TestStackSummaryOfARemoval(t *testing.T) {
 	out := plainSummary(t, []stack.Row{
 		row("skill", "a", "claude", "removed", "removed"),
-		stack.Row{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.Restored, Change: stack.DidRestore, Detail: "CLAUDE.md.backup-1"},
+		row("instructions", "AGENTS.md", "claude", "removed", "removed"),
 		row("instructions", "AGENTS.md", "codex", "removed", "removed"),
 	})
-	if strings.Contains(out, "✓") || !strings.Contains(out, "− removed  a") || !strings.Contains(out, "• restored  Claude Code (CLAUDE.md.backup-1)") || !strings.Contains(out, "− removed  Codex") {
+	if strings.Contains(out, "✓") || !strings.Contains(out, "− removed  a") || !strings.Contains(out, "− removed  Claude Code, Codex") {
 		t.Errorf("summary:\n%s", out)
 	}
 }
@@ -119,8 +119,8 @@ func TestStackOutputStripsEscapesFromRepoNames(t *testing.T) {
 	rows := []stack.Row{
 		row("skill", evil, "claude", stack.Linked, stack.DidLink),
 		row("skill", evil+"2", "claude", stack.Missing, ""),
-		{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.BackedUp, Change: stack.DidBackUp, Detail: "CLAUDE.md.backup-1\x07"},
-		{Kind: "skill", Name: evil, Harness: "agents", State: stack.Conflict, Detail: "/h/" + evil},
+		{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.Stale, Detail: "/h/CLAUDE.md\x07"},
+		{Kind: "skill", Name: evil, Harness: "agents", State: stack.Failed, Detail: "/h/" + evil},
 	}
 	for name, out := range map[string]string{"summary": StackSummary(rows), "status": StackStatus(rows)} {
 		for _, bad := range []string{"\x1b]", "\x07"} {
@@ -140,25 +140,25 @@ func plainStatus(t *testing.T, rows []stack.Row) string {
 	return buf.String()
 }
 
-func TestStackStatusFlagsConflictsWithoutAnUpdateHint(t *testing.T) {
+func TestStackStatusFlagsFailuresWithoutAnUpdateHint(t *testing.T) {
 	out := plainStatus(t, []stack.Row{
-		{Kind: "skill", Name: "x", Harness: "claude", State: stack.Conflict, Detail: "/h/.claude/skills/x exists"},
+		{Kind: "skill", Name: "x", Harness: "claude", State: stack.Failed, Detail: "lstat /h/.claude/skills/x: permission denied"},
 		row("skill", "y", "claude", stack.Linked, ""),
 	})
-	for _, want := range []string{"! conflict", "! 1 conflict, left alone", "/h/.claude/skills/x exists"} {
+	for _, want := range []string{"! failed", "! 1 failed", "lstat /h/.claude/skills/x: permission denied"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "✓ conflict") || strings.Contains(out, "sifatul-stack update") {
+	if strings.Contains(out, "✓ failed") || strings.Contains(out, "sifatul-stack update") {
 		t.Errorf("status:\n%s", out)
 	}
 }
 
-func TestStackStatusAsksForUpdateOnOrphansAndBlockedLinks(t *testing.T) {
+func TestStackStatusAsksForUpdateOnOrphansAndPathsToReplace(t *testing.T) {
 	for _, r := range []stack.Row{
 		row("agent", "gone", "claude", stack.Orphaned, ""),
-		{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.Missing, Detail: "/h/.claude/CLAUDE.md"},
+		{Kind: "instructions", Name: "AGENTS.md", Harness: "claude", State: stack.Stale, Detail: "/h/.claude/CLAUDE.md"},
 	} {
 		out := plainStatus(t, []stack.Row{r})
 		if strings.Contains(out, "✓") || !strings.Contains(out, "sifatul-stack update") {
@@ -173,14 +173,14 @@ func TestStackStatusOffAgentNeedsNoUpdate(t *testing.T) {
 	}
 }
 
-func TestStackSummaryListsWrittenPrunedAndPluralConflicts(t *testing.T) {
+func TestStackSummaryListsWrittenPrunedAndPluralFailures(t *testing.T) {
 	out := plainSummary(t, []stack.Row{
 		row("skill", "a", "claude", stack.Linked, stack.DidLink),
 		row("skill", "a", "agents", stack.Linked, ""),
 		row("skill", "old", "claude", stack.Pruned, stack.DidPrune),
 		row("agent", "senior", "codex", stack.Written, stack.DidWrite),
-		{Kind: "skill", Name: "x", Harness: "claude", State: stack.Conflict, Detail: "one"},
-		{Kind: "skill", Name: "z", Harness: "claude", State: stack.Conflict, Detail: "two"},
+		{Kind: "skill", Name: "x", Harness: "claude", State: stack.Failed, Detail: "one"},
+		{Kind: "skill", Name: "z", Harness: "claude", State: stack.Failed, Detail: "two"},
 	})
 	for _, want := range []string{
 		"+ new  a (Claude Code)",
@@ -188,7 +188,7 @@ func TestStackSummaryListsWrittenPrunedAndPluralConflicts(t *testing.T) {
 		"✓ 1 linked into Claude Code, ~/.agents",
 		"✓ 1 rendered for Codex",
 		"+ new  senior",
-		"! 2 conflicts, left alone",
+		"! 2 failed",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary lacks %q:\n%s", want, out)
