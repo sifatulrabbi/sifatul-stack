@@ -12,10 +12,10 @@ One harness-neutral stack of skills, named sub-agents, and global instructions, 
 
 ## How installs work
 
-- The binary carries only logic; the stack content is read at runtime. Every `install` clones this repo into `${XDG_DATA_HOME:-~/.local/share}/sifatul-stack/stack` if it is missing, otherwise runs `git pull --ff-only` there, then syncs and records it in `state.json` next to it. So content changes ship by pushing to `main`; only Go changes need a release.
+- The binary carries only logic; the stack content is read at runtime. Every `install` clones this repo into `${XDG_DATA_HOME:-~/.local/share}/sifatul-stack/stack` if it is missing, re-clones it when its stored origin URL or checked-out branch no longer matches (refusing, like `pull`, when the clone has uncommitted or unpushed work), otherwise runs `git pull --ff-only` there, then syncs and records it in `state.json` next to it. So content changes ship by pushing to `main`; only Go changes need a release.
 - `install --from <checkout>` links a working copy instead (dev mode) and never pulls it.
 - `state.json` also records the chosen harnesses (`install --harness`, or the picker in a terminal); no list means all three. `install` and `status` touch only the chosen harnesses; a harness never chosen is never touched. A harness dropped from the previous choice is cleaned up by that `install`: its owned links and agent files are removed and nothing is restored. `~/.agents/skills` belongs to Codex and OpenCode together, so it stays while either is chosen.
-- `install` also picks extras (`--extras`, the picker, or the last choice; none on a first run) and records them in `state.json`. Each chosen extra is cloned into `extras/<name>` next to the stack clone, re-cloned when its URL or branch changes, and pulled on every `install`; its skills link into the same skill dirs as the stack's, and the stack wins a name clash. Dropping an extra prunes its links and deletes its clone. `status` never pulls extras.
+- `install` also picks extras (`--extras`, the picker, or the last choice; none on a first run) and records them in `state.json`. Each chosen extra is cloned into `extras/<name>` next to the stack clone, re-cloned the same way when its URL or branch changes, and pulled on every `install`; its skills link into the same skill dirs as the stack's, and the stack wins a name clash. Dropping an extra prunes its links and deletes its clone. `status` never pulls extras.
 - `SIFATUL_STACK_REPO` overrides the clone URL (tests and e2e runs).
 
 ## Rules

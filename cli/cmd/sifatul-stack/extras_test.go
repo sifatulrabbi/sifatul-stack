@@ -130,8 +130,27 @@ func TestInstallReclonesAnExtraWhoseBranchChanged(t *testing.T) {
 		t.Errorf("fresh links to %s", got)
 	}
 	repo := source.Repo{Dir: f.extraClone("mp"), URL: up, Branch: "next", Git: source.ExecGit}
-	if !repo.Tracks(context.Background()) {
-		t.Error("the clone does not track the new branch")
+	if ok, err := repo.Tracks(context.Background()); err != nil || !ok {
+		t.Errorf("the clone does not track the new branch: %v", err)
+	}
+}
+
+func TestInstallRefusesToWipeAnExtraCloneWithLocalWork(t *testing.T) {
+	f := newFixture(t)
+	up := newExtraUpstream(t, "skills/tdd")
+	f.publishExtras(map[string]manifestEntry{"mp": {Repo: up, Skills: []string{"tdd"}}})
+	f.mustRun("install", "--harness", "claude", "--extras", "mp")
+	gitT(t, "-C", f.extraClone("mp"), "checkout", "--quiet", "-b", "mine")
+	mine := filepath.Join(f.extraClone("mp"), "skills", "tdd", "notes.md")
+	writeFile(t, mine, "local work\n")
+
+	out, code := f.run("install")
+
+	if _, err := os.Stat(mine); err != nil {
+		t.Error("install deleted local work in the extra's clone")
+	}
+	if code == 0 || !strings.Contains(out, "local changes") {
+		t.Errorf("exit %d:\n%s", code, out)
 	}
 }
 

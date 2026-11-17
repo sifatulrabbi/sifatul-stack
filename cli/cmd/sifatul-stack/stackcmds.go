@@ -148,7 +148,7 @@ func newInstallCmd(e stackEnv) *cobra.Command {
 			"Whatever already sits at a target path (a skill link, a global instructions file, a sub-agent file) is replaced without a backup. " +
 			"--from links your own checkout instead of the managed clone; install never pulls it.\n\n" +
 			"Extras are other skill repos listed in the stack's extras.json. In a terminal, install asks which extras to add after the harnesses; --extras skips the question, and without either it keeps the last choice (none on a first install). " +
-			"Each chosen extra is cloned into the data dir, or pulled when already there, and its listed skills are linked next to the stack's own. " +
+			"Each chosen extra is cloned into the data dir, or pulled when already there (re-cloned when its repo or branch changed, unless the clone holds local work), and its listed skills are linked next to the stack's own. " +
 			"An extra you drop has its links and its clone removed.",
 		Example: "  sifatul-stack install\n  sifatul-stack install --harness claude,codex\n  sifatul-stack install --extras mattpocock\n  sifatul-stack install --extras none\n  sifatul-stack install --from ~/projects/sifatul-stack",
 		Args:    cobra.NoArgs,
@@ -307,13 +307,7 @@ func parseExtras(names []string, manifest []stack.Extra) ([]stack.Extra, error) 
 
 func (e stackEnv) fetchExtras(cmd *cobra.Command, extras []stack.Extra) error {
 	for _, x := range extras {
-		repo := e.extraRepo(x)
-		if _, err := os.Stat(repo.Dir); err == nil && !repo.Tracks(cmd.Context()) {
-			if err := os.RemoveAll(repo.Dir); err != nil {
-				return err
-			}
-		}
-		if err := e.step(cmd, x.Name, pullOrClone(repo)); err != nil {
+		if err := e.step(cmd, x.Name, syncStep(e.extraRepo(x))); err != nil {
 			return err
 		}
 	}
@@ -338,19 +332,14 @@ func (e stackEnv) removeClonesExcept(keep []string) error {
 	return nil
 }
 
-func pullOrClone(repo source.Repo) func(ctx context.Context) (string, error) {
+func syncStep(repo source.Repo) func(ctx context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
-		cloned, err := repo.Ensure(ctx)
+		change, err := repo.Sync(ctx)
 		switch {
 		case err != nil:
 			return "", err
-		case cloned:
+		case change.Cloned:
 			return "cloned " + repo.URL + " into " + repo.Dir, nil
-		}
-		change, err := repo.Pull(ctx)
-		switch {
-		case err != nil:
-			return "", err
 		case change.Updated():
 			return "updated " + change.From + " → " + change.To, nil
 		default:
@@ -369,7 +358,7 @@ func (e stackEnv) resolveSource(cmd *cobra.Command, from string) (source.State, 
 		return source.State{Source: dir}, nil
 	}
 	repo := e.repo()
-	if err := e.step(cmd, brand, pullOrClone(repo)); err != nil {
+	if err := e.step(cmd, brand, syncStep(repo)); err != nil {
 		return source.State{}, err
 	}
 	dir, err := checkout(repo.Dir)

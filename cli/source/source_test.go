@@ -292,34 +292,198 @@ func TestEnsureChecksOutTheChosenBranch(t *testing.T) {
 	}
 }
 
+func tracks(t *testing.T, r source.Repo) bool {
+	t.Helper()
+	ok, err := r.Tracks(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
+}
+
 func TestTracksComparesTheOriginAndBranch(t *testing.T) {
 	u := newUpstream(t)
 	git(t, "-C", u.dir, "branch", "next")
 	ctx := context.Background()
 	r := repo(t, u)
-	if r.Tracks(ctx) {
-		t.Error("a missing clone tracks nothing")
+	if _, err := r.Tracks(ctx); err == nil {
+		t.Error("a missing clone should be an error, not a verdict")
 	}
 	if _, err := r.Ensure(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	if !r.Tracks(ctx) {
+	if !tracks(t, r) {
 		t.Error("a fresh clone of the default branch should track it")
 	}
 	main := r
 	main.Branch = "main"
-	if !main.Tracks(ctx) {
+	if !tracks(t, main) {
 		t.Error("naming the default branch should still track")
 	}
 	next := r
 	next.Branch = "next"
-	if next.Tracks(ctx) {
+	if tracks(t, next) {
 		t.Error("a clone of main does not track next")
 	}
 	moved := r
 	moved.URL = u.dir + "-moved"
-	if moved.Tracks(ctx) {
+	if tracks(t, moved) {
 		t.Error("a clone of another URL does not track")
+	}
+}
+
+func TestTracksHonorsTheStoredURLUnderAnInsteadOfRule(t *testing.T) {
+	u := newUpstream(t)
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(cfg, []byte("[url \"file://"+u.dir+"\"]\n\tinsteadOf = https://example.test/up\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	r := source.Repo{Dir: filepath.Join(t.TempDir(), "extras", "mp"), URL: "https://example.test/up", Git: source.ExecGit}
+	if _, err := r.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if !tracks(t, r) {
+		t.Error("a fresh clone through an insteadOf rule should track its manifest URL")
+	}
+}
+
+func TestTracksReportsAMissingOriginHeadAsAnError(t *testing.T) {
+	u := newUpstream(t)
+	r := repo(t, u)
+	ctx := context.Background()
+	if _, err := r.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	git(t, "-C", r.Dir, "remote", "set-head", "origin", "--delete")
+
+	if _, err := r.Tracks(ctx); err == nil {
+		t.Error("an unknown default branch should be an error, not a mismatch")
+	}
+}
+
+func TestSyncClonesThenPulls(t *testing.T) {
+	u := newUpstream(t)
+	r := repo(t, u)
+	ctx := context.Background()
+
+	change, err := r.Sync(ctx)
+	if err != nil || !change.Cloned {
+		t.Fatalf("first sync: %+v %v", change, err)
+	}
+	u.commit("skills/b/SKILL.md", "b\n")
+	change, err = r.Sync(ctx)
+	if err != nil || change.Cloned || !change.Updated() {
+		t.Fatalf("second sync: %+v %v", change, err)
+	}
+	if _, err := os.Stat(filepath.Join(r.Dir, "skills", "b", "SKILL.md")); err != nil {
+		t.Fatal("sync did not pull the new skill")
+	}
+}
+
+func TestSyncReclonesWhenTheBranchChanged(t *testing.T) {
+	u := newUpstream(t)
+	git(t, "-C", u.dir, "checkout", "--quiet", "-b", "next")
+	u.commit("skills/n/SKILL.md", "n\n")
+	git(t, "-C", u.dir, "checkout", "--quiet", "main")
+	r := repo(t, u)
+	ctx := context.Background()
+	if _, err := r.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Branch = "next"
+
+	change, err := r.Sync(ctx)
+	if err != nil || !change.Cloned {
+		t.Fatalf("sync after a branch change: %+v %v", change, err)
+	}
+	if !tracks(t, r) {
+		t.Error("the re-clone is not on next")
+	}
+	if err := filepath.WalkDir(r.Dir, func(path string, d os.DirEntry, err error) error {
+		if err == nil && path != r.Dir && d.Name() == ".git" && filepath.Dir(path) != r.Dir {
+			t.Errorf("the old clone was left at %s", path)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(r.Dir)); len(entries) != 1 {
+		t.Errorf("leftovers next to the clone: %v", entries)
+	}
+}
+
+func TestSyncRefusesToRecloneOverLocalWork(t *testing.T) {
+	for name, work := range map[string]func(dir string){
+		"uncommitted": func(dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "mine.md"), []byte("mine\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"committed": func(dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "mine.md"), []byte("mine\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			git(t, "-C", dir, "add", "-A")
+			git(t, "-C", dir, "commit", "--quiet", "-m", "mine")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := newUpstream(t)
+			r := repo(t, u)
+			ctx := context.Background()
+			if _, err := r.Sync(ctx); err != nil {
+				t.Fatal(err)
+			}
+			git(t, "-C", r.Dir, "checkout", "--quiet", "-b", "mine")
+			work(r.Dir)
+
+			if _, err := r.Sync(ctx); !errors.Is(err, source.ErrDirty) {
+				t.Fatalf("err = %v, want ErrDirty", err)
+			}
+			if _, err := os.Stat(filepath.Join(r.Dir, "mine.md")); err != nil {
+				t.Error("sync deleted local work")
+			}
+		})
+	}
+}
+
+func TestSyncKeepsTheOldCloneWhenTheRecloneFails(t *testing.T) {
+	u := newUpstream(t)
+	r := repo(t, u)
+	ctx := context.Background()
+	if _, err := r.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Branch = "gone"
+
+	if _, err := r.Sync(ctx); err == nil {
+		t.Fatal("sync to a missing branch reported success")
+	}
+	if _, err := os.Stat(filepath.Join(r.Dir, "skills", "a", "SKILL.md")); err != nil {
+		t.Error("a failed re-clone removed the old clone")
+	}
+}
+
+func TestSyncStopsOnAGitErrorInsteadOfRecloning(t *testing.T) {
+	u := newUpstream(t)
+	r := repo(t, u)
+	ctx := context.Background()
+	if _, err := r.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	git(t, "-C", r.Dir, "remote", "set-head", "origin", "--delete")
+	marker := filepath.Join(r.Dir, ".git", "marker")
+	if err := os.WriteFile(marker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.Sync(ctx); err == nil {
+		t.Fatal("sync hid a git error")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Error("sync re-cloned after a git error")
 	}
 }

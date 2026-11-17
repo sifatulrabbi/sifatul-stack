@@ -59,10 +59,11 @@ func (r Repo) Ensure(ctx context.Context) (cloned bool, err error) {
 }
 
 func (r Repo) clone(ctx context.Context) error {
-	if err := os.MkdirAll(filepath.Dir(r.Dir), 0o755); err != nil {
+	parent := filepath.Dir(r.Dir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.MkdirTemp(filepath.Dir(r.Dir), "."+filepath.Base(r.Dir)+".clone-*")
+	tmp, err := os.MkdirTemp(parent, "."+filepath.Base(r.Dir)+".clone-*")
 	if err != nil {
 		return err
 	}
@@ -74,12 +75,23 @@ func (r Repo) clone(ctx context.Context) error {
 	if _, err := r.Git(ctx, append(args, "--", r.URL, tmp)...); err != nil {
 		return err
 	}
+	if _, err := os.Lstat(r.Dir); err == nil {
+		old, err := os.MkdirTemp(parent, "."+filepath.Base(r.Dir)+".old-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(old)
+		if err := os.Rename(r.Dir, filepath.Join(old, "clone")); err != nil {
+			return err
+		}
+	}
 	return os.Rename(tmp, r.Dir)
 }
 
 type Change struct {
-	From string
-	To   string
+	From   string
+	To     string
+	Cloned bool
 }
 
 func (c Change) Updated() bool { return c.From != c.To }
@@ -103,21 +115,63 @@ func (r Repo) Pull(ctx context.Context) (Change, error) {
 	return Change{From: from, To: to}, err
 }
 
-func (r Repo) Tracks(ctx context.Context) bool {
-	url, err := r.git(ctx, "remote", "get-url", "origin")
-	if err != nil || strings.TrimSpace(string(url)) != r.URL {
-		return false
+func (r Repo) Sync(ctx context.Context) (Change, error) {
+	cloned, err := r.Ensure(ctx)
+	if err != nil {
+		return Change{}, err
+	}
+	if !cloned {
+		tracks, err := r.Tracks(ctx)
+		if err != nil {
+			return Change{}, err
+		}
+		if tracks {
+			return r.Pull(ctx)
+		}
+		if err := r.reclone(ctx); err != nil {
+			return Change{}, err
+		}
+	}
+	to, err := r.head(ctx)
+	return Change{To: to, Cloned: true}, err
+}
+
+func (r Repo) reclone(ctx context.Context) error {
+	status, err := r.git(ctx, "status", "--porcelain")
+	if err != nil {
+		return err
+	}
+	unpushed, err := r.git(ctx, "log", "--oneline", "--branches", "--not", "--remotes")
+	if err != nil {
+		return err
+	}
+	if len(strings.TrimSpace(string(status)+string(unpushed))) > 0 {
+		return fmt.Errorf("%s must be re-cloned from %s: %w", r.Dir, r.URL, ErrDirty)
+	}
+	return r.clone(ctx)
+}
+
+func (r Repo) Tracks(ctx context.Context) (bool, error) {
+	url, err := r.git(ctx, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(string(url)) != r.URL {
+		return false, nil
 	}
 	want := r.Branch
 	if want == "" {
 		out, err := r.git(ctx, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 		if err != nil {
-			return false
+			return false, err
 		}
 		want = strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
 	}
-	head, err := r.git(ctx, "symbolic-ref", "--short", "HEAD")
-	return err == nil && strings.TrimSpace(string(head)) == want
+	head, err := r.git(ctx, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(head)) == want, nil
 }
 
 func (r Repo) head(ctx context.Context) (string, error) {
