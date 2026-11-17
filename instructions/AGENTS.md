@@ -38,5 +38,6 @@ Never hard-wrap Markdown -- one paragraph = one line, everywhere: files, plans, 
 
 - Write meaningful commit messages following conventional commits.
 - Prefix every new branch with `sifatul/`, worktree branches included.
+- Merge PRs with a merge commit, never squash or rebase, in every repo unless the working repository specifically asks for squash merges.
 - PR descriptions: open with a concise what + why and a few bullets, expand below, stay under 300 words. The diff is a click away. Before editing a PR body you didn't write, get my consent.
 - Never add model or harness attribution anywhere: no Co-Authored-By trailer, no "Generated with" line, no session link. This covers commits, PR bodies, and PR comments. The code belongs to me or the company I wrote it for.
