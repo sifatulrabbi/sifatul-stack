@@ -5,28 +5,27 @@ description: Multi-agent code review -- specialist reviewers chosen by risk, eve
 
 # Full review -- lead
 
-You are the lead. You triage the change, decide which specialists run, launch them, get every finding verified, and write the final review. Specialists and verifiers never edit the user's code and only write inside the round directory. You are the only one who talks to the user and the only one who posts anything.
+You are the lead. You triage the change, decide which specialists run, launch them, get every finding verified, and write the final review. With `--auto-fix`, fixers then fix the kept findings and a second round reviews the fixes (step 8). Specialists and verifiers never edit the user's code and only write inside the round directory. You are the only one who talks to the user and the only one who posts anything.
 
 Run this from a `senior` session. Every launch names one of these agents, never a model, so the skill works in any harness. If your harness lacks one, use its closest model:
 
-| Agent       | Use                                                         | Models                  |
-| ----------- | ----------------------------------------------------------- | ----------------------- |
-| `senior`    | The lead, every specialist, and every verifier              | Opus, Sol, or similar   |
-| `associate` | The scouts that gather context, and the related-PRs check   | Haiku, Luna, or similar |
+- `senior` (Opus, Sol, or similar): the lead, every specialist, every verifier, and the senior fixer.
+- `junior` (Sonnet, Terra, or similar): the junior fixer under `--auto-fix`.
+- `associate` (Haiku, Luna, or similar): the scouts that gather context, and the related-PRs check.
 
 If the harness can't set a model per agent, use the session model.
 
-Paths below: `SKILL_DIR` is this skill's directory; `ROUND_DIR`, `PREV_ROUND_DIR`, `REVIEW_TREE` and `WORKTREE_BASE` come from step 1. Every file in the round is Markdown in the shapes from `references/findings-format.md`.
+Paths below: `SKILL_DIR` is this skill's directory; `ROUND_DIR`, `PREV_ROUND_DIR`, `REVIEW_TREE`, `WORKTREE_BASE` and `FIXES_REF` come from step 1. Every file in the round is Markdown in the shapes from `references/findings-format.md`.
 
 ## 0. Fresh session
 
-A review is only cold if its reviewer didn't write the code. If this session edited, committed, planned, or implemented any of the code under review, stop and tell the user: `Start a new session in this repo and run full-review on <target>.` There is no override. The specialists and verifiers you launch start with no history of the code, so they pass this check.
+A review is only cold if its reviewer didn't write the code. If this session edited, committed, planned, or implemented any of the code under review, stop and tell the user: `Start a new session in this repo and run full-review on <target>.` There is no override. The specialists and verifiers you launch start with no history of the code, so they pass this check. Commits made by the fixers in step 8 don't count as this session's work: you route and ask, and never write fix code.
 
 ## 1. Set up the round
 
 Identify base and head without changing the user's checkout:
 
-- **GitHub PR:** `gh pr view <n> --json number,title,body,url,baseRefName,headRefOid`, then `git fetch origin <baseRefName> pull/<n>/head`. Target: `pr<n>`.
+- **GitHub PR:** `gh pr view <n> --json number,title,body,url,baseRefName,headRefName,headRefOid`, then `git fetch origin <baseRefName> pull/<n>/head`. Target: `pr<n>`.
 - **Local branch:** base is the default branch, head is the branch tip. Target: the branch name.
 - **Uncommitted work:** head is `git stash create` (a commit of the working tree that leaves it untouched; fall back to `HEAD` if empty). Untracked files aren't included; ask the user to stage them if they should be reviewed. Target: `<branch>-wip`.
 
@@ -36,6 +35,7 @@ Run `SKILL_DIR/scripts/init_run.sh <target> <head-sha>` from the repo root. Each
 - `PREV_ROUND_DIR`: the latest finished round of this target, or empty. If set, this is a re-review: follow "Re-review" below alongside every step.
 - `REVIEW_TREE`: a detached worktree at head. Every agent reads code from here, never from the user's checkout.
 - `WORKTREE_BASE`: where verifier scratch worktrees go.
+- `FIXES_REF`: the ref that pins fixer commits under `--auto-fix`.
 
 ```
 <target dir>/round-<N>/
@@ -67,19 +67,19 @@ Write `ROUND_DIR/brief.md`: base and head, `REVIEW_TREE`, intent (claimed vs act
 
 Each specialist owns its whole concern area across every file it touches: one job per concern, whatever the file count. Launch only specialists whose trigger matches the risk map. Every specialist runs on `senior`: reviewing is judgment and discovery, which a `junior` can't verify its way through. Correctness runs on nearly every team review.
 
-| Specialist      | Launch when the semantic change touches                                                                               |
-| --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| correctness     | Any logic (default for team reviews)                                                                                  |
-| security        | Auth, permissions, input parsing, external requests, file paths, secrets, crypto, user data, queries built from input |
-| architecture    | New modules, services or classes; cross-layer imports; moved responsibilities; a new pattern                          |
-| concurrency     | Async code, threads, locks, queues, shared mutable state, retries, timeouts                                           |
-| data-migrations | Schema files, migrations, backfills, ORM models                                                                       |
-| tests           | Any behavior change, or test files: missing regression tests and tests that don't earn their keep                     |
-| maintainability | Substantial new or rewritten code (skip for small fixes)                                                              |
-| performance     | DB queries, loops over collections, request hot paths, caching, batch jobs                                            |
-| api-compat      | Public APIs, exported functions, request/response schemas, events, CLI flags, config formats                          |
-| dependencies    | Manifests or lockfiles                                                                                                |
-| ops-rollout     | Config, feature flags, logging, metrics, deploy files, anything hard to roll back                                     |
+Launch each specialist when the semantic change touches:
+
+- **correctness**: Any logic (default for team reviews)
+- **security**: Auth, permissions, input parsing, external requests, file paths, secrets, crypto, user data, queries built from input
+- **architecture**: New modules, services or classes; cross-layer imports; moved responsibilities; a new pattern
+- **concurrency**: Async code, threads, locks, queues, shared mutable state, retries, timeouts
+- **data-migrations**: Schema files, migrations, backfills, ORM models
+- **tests**: Any behavior change, or test files: missing regression tests and tests that don't earn their keep
+- **maintainability**: Substantial new or rewritten code (skip for small fixes)
+- **performance**: DB queries, loops over collections, request hot paths, caching, batch jobs
+- **api-compat**: Public APIs, exported functions, request/response schemas, events, CLI flags, config formats
+- **dependencies**: Manifests or lockfiles
+- **ops-rollout**: Config, feature flags, logging, metrics, deploy files, anything hard to roll back
 
 If the risk map shows a concern no specialist covers (billing math, a specific flag rollout, an ML pipeline), fill in `references/adhoc-specialist.md` as `jobs/<job>-role.md` and launch it on `senior`.
 
@@ -143,7 +143,7 @@ Every finding is verified. The user should only see findings that survived an at
 
 ## 7. Write the review
 
-Write `ROUND_DIR/review.md` from `final.md` and the files it points at, and show it in chat:
+Write `ROUND_DIR/review.md` from `final.md` and the files it points at, and show it in chat (with `--auto-fix`, show only round 2's):
 
 ```markdown
 # Review: <PR title or branch>
@@ -181,9 +181,48 @@ Write in one voice; don't attribute findings to specialists. Merge findings that
 
 Post to the PR only when the user asks (asking up front counts as confirmation). Summary comment: `gh pr comment <n> --body-file ROUND_DIR/review.md`. Inline: one PR review via `gh api repos/{owner}/{repo}/pulls/<n>/reviews` with a `comments` array, so it lands as a single review. Never approve or request changes on the PR unless asked.
 
-## 8. Clean up
+## 8. Auto-fix
 
-`SKILL_DIR/scripts/cleanup_run.sh <target>` removes the review and scratch worktrees of every round. Keep the round directories.
+Only with `--auto-fix`, and only from round 1. Fixers commit on top of the reviewed head in round 1's `REVIEW_TREE`, pinned by `FIXES_REF`; nothing is pushed until the user says so.
+
+1. **Ask once, up front.** In one question, put each alternative in `final.md` (take it instead of the fix, fix the finding the quick way, or leave the finding open) and each environment need named in a plausible verdict's evidence. Skip it when there are neither.
+2. **Junior pass.** List the confirmed findings whose verdict has a `## Regression test` and whose alternative the user didn't take. If there are any, write `ROUND_DIR/jobs/fixer-junior.md` and launch a `junior` with `You are a code fixer. Read your job file at ROUND_DIR/jobs/fixer-junior.md and follow it.`
+3. **Senior pass.** List every other kept finding the user didn't leave open, plus the junior's `handed off` items. If there are any, write `ROUND_DIR/jobs/fixer-senior.md` with the alternatives the user took and their answers from 1, and launch a `senior` with the same prompt pointing at it.
+4. **Ask about what's open.** Bring every `needs impact decision`, `blocked`, and `deferred` item in `ROUND_DIR/fixes.md` to the user in one question, using the ask each item ends with.
+5. **Senior pass 2.** Send the fixer the answers, or if your harness can't resume it, launch a new one on `ROUND_DIR/jobs/fixer-senior-2.md` with the open findings and the answers. This is the last pass: whatever is still open goes in the review as a named blocker.
+6. **Round 2.** If `FIXES_REF` doesn't exist, nothing was fixed: show the user what's open in `fixes.md` and stop. Otherwise run `init_run.sh <target> FIXES_REF` and follow steps 2 to 7 as a re-review, without fixing. Its review says what the fixers fixed (from round 1's `fixes.md`), what is still open and what it needs, and what round 2 found.
+7. **Deliver.** The fix sha is `git rev-parse FIXES_REF`. For a PR, offer `git push origin <fix sha>:<headRefName>`, and push only if `git ls-remote origin <headRefName>` still shows the reviewed head. For a local branch, tell the user to run `git merge --ff-only <fix sha>`. For uncommitted work, tell them to run `git diff <reviewed head> <fix sha> | git apply`.
+
+Fixer job file (the junior's has no alternatives or answers):
+
+```markdown
+# Job: fixer-junior | fixer-senior | fixer-senior-2
+
+Role: SKILL_DIR/agents/fixer-junior.md or SKILL_DIR/agents/fixer-senior.md
+Protocol: SKILL_DIR/references/fix-protocol.md
+Format: SKILL_DIR/references/findings-format.md
+Brief: ROUND_DIR/brief.md
+Code: REVIEW_TREE
+Pin: FIXES_REF
+Notes: ROUND_DIR/notes/<job>.md
+Output: ROUND_DIR/fixes.md
+
+## Findings
+
+- <id>: ROUND_DIR/findings/<job>/<n>.md, ROUND_DIR/verified/<id>.md
+
+## Take the alternative
+
+- <id>
+
+## User answers
+
+- <id>: <answer>
+```
+
+## 9. Clean up
+
+`SKILL_DIR/scripts/cleanup_run.sh <target>` removes the review and scratch worktrees of every round, and `FIXES_REF`. Keep the round directories. With `--auto-fix`, clean up only once the user has pushed or merged the fixes, or said to discard them.
 
 ## Related open PRs
 

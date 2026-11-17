@@ -70,6 +70,17 @@ class InitRunTest(unittest.TestCase):
         self.assertEqual(out["PREV_ROUND_DIR"], first["ROUND_DIR"])
         self.assertEqual((pathlib.Path(out["REVIEW_TREE"]) / "f.txt").read_text(), "b")
 
+    def test_cleanup_drops_the_fixes_ref_with_the_worktrees(self):
+        out = self.sh("init_run.sh", "feature/x", self.first)
+        self.assertEqual(out["FIXES_REF"], "refs/full-review/feature-x/fixes")
+        self.git("update-ref", out["FIXES_REF"], self.first)
+
+        self.sh("cleanup_run.sh", "feature/x")
+
+        refs = self.git("for-each-ref", "refs/full-review/")
+        self.assertEqual(refs, "")
+        self.assertFalse(pathlib.Path(out["REVIEW_TREE"]).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

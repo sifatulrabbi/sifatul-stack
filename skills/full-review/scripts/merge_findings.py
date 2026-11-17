@@ -130,10 +130,6 @@ def batches(clusters, size):
     return out
 
 
-def cell(text):
-    return str(text).replace("|", "\\|")
-
-
 def location(file, lines):
     if not file:
         return "PR-wide"
@@ -217,7 +213,7 @@ def final(round_dir):
             elif not v:
                 unverified.append(f)
             else:
-                reason = f"duplicate of {v['duplicate_of']}" if v["status"] == "duplicate" and v["duplicate_of"] else v["reason"]
+                reason = f"Duplicate of {v['duplicate_of']}." if v["status"] == "duplicate" and v["duplicate_of"] else v["reason"]
                 dropped.append((v["status"], f, reason))
     kept.sort(key=lambda fv: (SEV[fv[1]["severity"]], fv[1]["status"] != "confirmed", fv[0]["file"], fv[0]["lines"][0]))
     out = [
@@ -231,12 +227,12 @@ def final(round_dir):
         "",
         "## Kept",
         "",
-        "| Severity | Status | Finding | Location | Files |",
-        "| --- | --- | --- | --- | --- |",
     ]
     for f, v in kept:
-        files = f"{f['path'].relative_to(round_dir)} · {v['path'].relative_to(round_dir)}"
-        out.append(f"| {v['severity']} | {v['status']} | {cell(f['title'])} | {cell(location(f['file'], f['lines']))} | {cell(files)} |")
+        out.append(
+            f"- {v['severity']}, {v['status']}: {f['title']} ({location(f['file'], f['lines'])}), "
+            f"{f['path'].relative_to(round_dir)}, {v['path'].relative_to(round_dir)}"
+        )
     alternatives = [(f, f["sections"]["Alternative"]) for f, v in kept if f["sections"].get("Alternative") and v["alternative"] != "drop"]
     if alternatives:
         out += ["", "## Alternative directions"]
@@ -246,20 +242,16 @@ def final(round_dir):
         "",
         "## Dropped",
         "",
-        "| Status | Finding | Location | Reason |",
-        "| --- | --- | --- | --- |",
     ]
     for status, f, reason in dropped:
-        out.append(f"| {status} | {cell(f['title'])} | {cell(location(f['file'], f['lines']))} | {cell(reason)} |")
+        out.append(f"- {status}: {f['title']} ({location(f['file'], f['lines'])}).{' ' + reason if reason else ''}")
     out += [
         "",
         "## Unverified",
         "",
-        "| Severity | Finding | Location | File |",
-        "| --- | --- | --- | --- |",
     ]
     for f in sorted(unverified, key=lambda f: (SEV[f["severity"]], f["file"], f["lines"][0])):
-        out.append(f"| {f['severity']} | {cell(f['title'])} | {cell(location(f['file'], f['lines']))} | {cell(f['path'].relative_to(round_dir))} |")
+        out.append(f"- {f['severity']}: {f['title']} ({location(f['file'], f['lines'])}), {f['path'].relative_to(round_dir)}")
     (round_dir / "final.md").write_text("\n".join(out) + "\n")
 
 

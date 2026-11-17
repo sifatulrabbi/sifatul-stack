@@ -188,7 +188,7 @@ class FinalTest(RoundTest):
 
         self.assertEqual(res.returncode, 0, res.stderr)
         final = self.r.final()
-        self.assertIn("| critical | confirmed | Lost write | b.ts:120-134 |", final)
+        self.assertIn("- critical, confirmed: Lost write (b.ts:120-134), findings/correctness/1.md, verified/correctness-1.md\n", final)
         self.assertLess(final.index("Lost write"), final.index("Weak check"))
 
 
@@ -206,8 +206,8 @@ class FinalTest(RoundTest):
 
         final = self.r.final()
         dropped = final[final.index("## Dropped"):]
-        self.assertIn("| refuted | Flaky retry | b.ts:120-134 | Retry is bounded at line 40. |", dropped)
-        self.assertIn("| duplicate | Same check again | a.ts:12-14 | duplicate of security-1 |", dropped)
+        self.assertIn("- refuted: Flaky retry (b.ts:120-134). Retry is bounded at line 40.\n", dropped)
+        self.assertIn("- duplicate: Same check again (a.ts:12-14). Duplicate of security-1.\n", dropped)
 
 
     def test_lists_findings_no_verifier_reached_as_unverified(self):
@@ -219,7 +219,7 @@ class FinalTest(RoundTest):
         final = self.r.final()
         self.assertIn("unverified: 1", final)
         unverified = final[final.index("## Unverified"):]
-        self.assertIn("| high | Weak check | a.ts:120-134 | findings/security/1.md |", unverified)
+        self.assertIn("- high: Weak check (a.ts:120-134), findings/security/1.md\n", unverified)
 
 
     def test_carries_alternatives_only_from_kept_findings(self):
@@ -243,16 +243,6 @@ class FinalTest(RoundTest):
         self.r.run("final")
 
         self.assertNotIn("Move auth into middleware.", self.r.final())
-
-    def test_escapes_pipes_in_titles_so_tables_hold(self):
-        self.r.add("security", 1, finding(file="a.ts", title="a || b short-circuits"))
-        self.r.done("security")
-        self.r.verify("security-1", verdict())
-
-        self.r.run("final")
-
-        self.assertIn("| a \\|\\| b short-circuits | a.ts:120-134 |", self.r.final())
-
 
     def test_refuses_a_verdict_with_an_unknown_status(self):
         self.r.add("security", 1, finding())
