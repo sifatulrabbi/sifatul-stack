@@ -9,10 +9,9 @@ You are the lead. You triage the change, decide which specialists run, launch th
 
 Run this from a `senior` session. Every launch names one of these agents, never a model, so the skill works in any harness. If your harness lacks one, use its closest model:
 
-| Agent       | Use                                                         | Models                  |
-| ----------- | ----------------------------------------------------------- | ----------------------- |
-| `senior`    | The lead, every specialist, and every verifier              | Opus, Sol, or similar   |
-| `associate` | The scouts that gather context, and the related-PRs check   | Haiku, Luna, or similar |
+- `senior` (Opus, Sol, or similar): the lead, every specialist, every verifier, and the senior fixer.
+- `junior` (Sonnet, Terra, or similar): the junior fixer under `--auto-fix`.
+- `associate` (Haiku, Luna, or similar): the scouts that gather context, and the related-PRs check.
 
 If the harness can't set a model per agent, use the session model.
 
@@ -67,19 +66,19 @@ Write `ROUND_DIR/brief.md`: base and head, `REVIEW_TREE`, intent (claimed vs act
 
 Each specialist owns its whole concern area across every file it touches: one job per concern, whatever the file count. Launch only specialists whose trigger matches the risk map. Every specialist runs on `senior`: reviewing is judgment and discovery, which a `junior` can't verify its way through. Correctness runs on nearly every team review.
 
-| Specialist      | Launch when the semantic change touches                                                                               |
-| --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| correctness     | Any logic (default for team reviews)                                                                                  |
-| security        | Auth, permissions, input parsing, external requests, file paths, secrets, crypto, user data, queries built from input |
-| architecture    | New modules, services or classes; cross-layer imports; moved responsibilities; a new pattern                          |
-| concurrency     | Async code, threads, locks, queues, shared mutable state, retries, timeouts                                           |
-| data-migrations | Schema files, migrations, backfills, ORM models                                                                       |
-| tests           | Any behavior change, or test files: missing regression tests and tests that don't earn their keep                     |
-| maintainability | Substantial new or rewritten code (skip for small fixes)                                                              |
-| performance     | DB queries, loops over collections, request hot paths, caching, batch jobs                                            |
-| api-compat      | Public APIs, exported functions, request/response schemas, events, CLI flags, config formats                          |
-| dependencies    | Manifests or lockfiles                                                                                                |
-| ops-rollout     | Config, feature flags, logging, metrics, deploy files, anything hard to roll back                                     |
+Launch each specialist when the semantic change touches:
+
+- **correctness**: Any logic (default for team reviews)
+- **security**: Auth, permissions, input parsing, external requests, file paths, secrets, crypto, user data, queries built from input
+- **architecture**: New modules, services or classes; cross-layer imports; moved responsibilities; a new pattern
+- **concurrency**: Async code, threads, locks, queues, shared mutable state, retries, timeouts
+- **data-migrations**: Schema files, migrations, backfills, ORM models
+- **tests**: Any behavior change, or test files: missing regression tests and tests that don't earn their keep
+- **maintainability**: Substantial new or rewritten code (skip for small fixes)
+- **performance**: DB queries, loops over collections, request hot paths, caching, batch jobs
+- **api-compat**: Public APIs, exported functions, request/response schemas, events, CLI flags, config formats
+- **dependencies**: Manifests or lockfiles
+- **ops-rollout**: Config, feature flags, logging, metrics, deploy files, anything hard to roll back
 
 If the risk map shows a concern no specialist covers (billing math, a specific flag rollout, an ML pipeline), fill in `references/adhoc-specialist.md` as `jobs/<job>-role.md` and launch it on `senior`.
 
