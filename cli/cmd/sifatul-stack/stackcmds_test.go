@@ -451,3 +451,31 @@ func TestSwitchingSourcesKeepsOpenCodeChoices(t *testing.T) {
 		t.Error("switching sources switched junior on in OpenCode")
 	}
 }
+
+func TestStaleAgentsShowAsStaleThenReRenderedThroughTheRealSyncer(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup")
+	for _, p := range []string{
+		filepath.Join(f.env.layout.Claude, "agents", "senior.md"),
+		filepath.Join(f.env.layout.OpenCode, "agents", "senior.md"),
+	} {
+		writeFile(t, p, readFile(t, p)+"local drift\n")
+	}
+
+	status := f.mustRun("status")
+	for _, want := range []string{"~ stale", "run `sifatul-stack update`"} {
+		if !strings.Contains(status, want) {
+			t.Errorf("status lacks %q:\n%s", want, status)
+		}
+	}
+	if strings.Contains(status, "✓ stale") || strings.Contains(status, "✓ off") {
+		t.Errorf("status shows a stale or off agent as healthy:\n%s", status)
+	}
+
+	update := f.mustRun("update")
+	for _, want := range []string{"~ re-rendered  senior (Claude Code, OpenCode)", "4 off in OpenCode"} {
+		if !strings.Contains(update, want) {
+			t.Errorf("update lacks %q:\n%s", want, update)
+		}
+	}
+}
