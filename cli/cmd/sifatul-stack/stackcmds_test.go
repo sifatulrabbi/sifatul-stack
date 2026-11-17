@@ -345,7 +345,7 @@ func TestSetupRejectsAnUnknownHarness(t *testing.T) {
 func TestSetupAsksWhichHarnessesInATerminal(t *testing.T) {
 	f := newFixture(t)
 	var offered []ui.Choice
-	f.env.found = func(h string) bool { return h == "codex" }
+	f.env.found = func(h stack.Harness) bool { return h.Key == "codex" }
 	f.env.choose = func(_ context.Context, choices []ui.Choice) ([]string, error) {
 		offered = choices
 		return []string{"claude"}, nil

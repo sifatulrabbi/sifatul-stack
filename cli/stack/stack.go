@@ -45,17 +45,6 @@ func LayoutFromEnv(home string, getenv func(string) string) Layout {
 	}
 }
 
-func (l Layout) Dir(harness string) string {
-	switch harness {
-	case "claude":
-		return l.Claude
-	case "codex":
-		return l.Codex
-	default:
-		return l.OpenCode
-	}
-}
-
 type Row struct {
 	Kind     string
 	Name     string
@@ -93,7 +82,7 @@ type run struct {
 }
 
 func (s Syncer) selected(harness string) bool {
-	return len(s.Selected) == 0 || slices.Contains(s.Selected, harness)
+	return slices.Contains(Chosen(s.Selected), harness)
 }
 
 func (r *run) on(harnesses ...string) *run {
@@ -108,6 +97,13 @@ func (r *run) on(harnesses ...string) *run {
 }
 
 func (s Syncer) Run(mode Mode) (Report, error) {
+	if mode != Unlink {
+		for _, h := range s.Selected {
+			if _, err := Find(h); err != nil {
+				return Report{}, err
+			}
+		}
+	}
 	var defs []agentDef
 	var skills []string
 	if !mode.releases() {
@@ -120,48 +116,57 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 		}
 	}
 	r := &run{Syncer: s, mode: mode, report: &Report{}}
-	targets := []struct {
-		harness string
-		dir     string
-		users   []string
-	}{
-		{"claude", filepath.Join(s.Layout.Claude, "skills"), []string{"claude"}},
-		{"agents", s.Layout.AgentsSkills, []string{"codex", "opencode"}},
-	}
-	for _, t := range targets {
-		x := r.on(t.users...)
+	for _, g := range skillsGroups() {
+		x := r.on(g.users...)
 		if x == nil {
 			continue
 		}
+		dir := g.dir(s.Layout)
 		if !x.mode.releases() {
 			for _, name := range skills {
-				x.linkPath("skill", name, t.harness, filepath.Join(s.Source, "skills", name), filepath.Join(t.dir, name))
+				x.linkPath("skill", name, g.key, filepath.Join(s.Source, "skills", name), filepath.Join(dir, name))
 			}
 		}
-		x.pruneSkills(t.harness, t.dir, skills)
+		x.pruneSkills(g.key, dir, skills)
 	}
 
-	for _, h := range Harnesses {
-		if x := r.on(h); x != nil {
-			x.linkInstructions(h, x.instructionsPath(h))
+	for _, h := range table {
+		if x := r.on(h.Key); x != nil {
+			x.linkInstructions(h.Key, h.instructionsPath(s.Layout))
 		}
 	}
 
 	for _, d := range defs {
-		for _, h := range Harnesses {
-			if x := r.on(h); x != nil && !x.mode.releases() {
-				if err := x.syncAgent(d, h); err != nil {
-					return *r.report, err
-				}
+		for _, h := range table {
+			if x := r.on(h.Key); x != nil && !x.mode.releases() {
+				x.syncAgent(d, h)
 			}
 		}
 	}
-	for _, h := range Harnesses {
-		if x := r.on(h); x != nil && x.mode != Detach {
+	for _, h := range table {
+		if x := r.on(h.Key); x != nil && x.mode != Detach {
 			x.pruneAgents(h, defs)
 		}
 	}
 	return *r.report, nil
+}
+
+type skillsTarget struct {
+	skillsGroup
+	users []string
+}
+
+func skillsGroups() []skillsTarget {
+	var out []skillsTarget
+	for _, h := range table {
+		i := slices.IndexFunc(out, func(t skillsTarget) bool { return t.key == h.skills.key })
+		if i < 0 {
+			out = append(out, skillsTarget{skillsGroup: h.skills})
+			i = len(out) - 1
+		}
+		out[i].users = append(out[i].users, h.Key)
+	}
+	return out
 }
 
 func (s Syncer) skills() ([]string, error) {
@@ -328,24 +333,6 @@ func newestBackup(dst string) string {
 	return newest
 }
 
-func (r *run) instructionsPath(harness string) string {
-	if harness == "claude" {
-		return filepath.Join(r.Layout.Claude, "CLAUDE.md")
-	}
-	return filepath.Join(r.Layout.Dir(harness), "AGENTS.md")
-}
-
-func (r *run) agentPath(tier, harness string) string {
-	switch harness {
-	case "claude":
-		return filepath.Join(r.Layout.Claude, "agents", tier+".md")
-	case "codex":
-		return filepath.Join(r.Layout.Codex, "agents", tier+".toml")
-	default:
-		return filepath.Join(r.Layout.OpenCode, "agents", tier+".md")
-	}
-}
-
 func managed(content string) bool {
 	return slices.Contains(strings.Split(content, "\n"), Mark)
 }
@@ -384,22 +371,19 @@ func writeFile(path string, data []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-func (r *run) syncAgent(d agentDef, harness string) error {
-	dst := r.agentPath(d.Tier, harness)
+func (r *run) syncAgent(d agentDef, h Harness) {
+	dst := h.agentPath(r.Layout, d.Tier)
 	text, present, err := readAgent(dst)
 	if err != nil {
-		r.conflict("agent", d.Tier, harness, err.Error())
-		return nil
+		r.conflict("agent", d.Tier, h.Key, err.Error())
+		return
 	}
 	if present && !managed(text) {
-		r.conflict("agent", d.Tier, harness, dst+" is not managed by sifatul-stack")
-		return nil
+		r.conflict("agent", d.Tier, h.Key, dst+" is not managed by sifatul-stack")
+		return
 	}
-	enabled := harness != "opencode" || (present && !slices.Contains(strings.Split(text, "\n"), "disabled: true"))
-	wanted, err := d.render(harness, enabled)
-	if err != nil {
-		return err
-	}
+	enabled := !h.toggles || (present && !slices.Contains(strings.Split(text, "\n"), "disabled: true"))
+	wanted := h.render(d, d.Models[h.Key], enabled)
 	state := "stale"
 	switch {
 	case !present:
@@ -410,32 +394,30 @@ func (r *run) syncAgent(d agentDef, harness string) error {
 	change := ""
 	if r.mode == Link && state != "current" {
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			r.fail("agent", d.Tier, harness, err)
-			return nil
+			r.fail("agent", d.Tier, h.Key, err)
+			return
 		}
 		if err := writeFile(dst, []byte(wanted)); err != nil {
-			r.fail("agent", d.Tier, harness, err)
-			return nil
+			r.fail("agent", d.Tier, h.Key, err)
+			return
 		}
 		change = map[string]string{"missing": "written", "stale": "re-rendered"}[state]
 		state = "written"
 	}
-	if harness == "opencode" {
+	if h.toggles {
 		state = map[bool]string{true: "on", false: "off"}[enabled] + ", " + state
 	}
-	r.did("agent", d.Tier, harness, state, change)
-	return nil
+	r.did("agent", d.Tier, h.Key, state, change)
 }
 
-func (r *run) pruneAgents(harness string, defs []agentDef) {
-	dir := filepath.Dir(r.agentPath("x", harness))
-	ext := filepath.Ext(r.agentPath("x", harness))
+func (r *run) pruneAgents(h Harness, defs []agentDef) {
+	dir := h.agentDir(r.Layout)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
-		tier, ok := strings.CutSuffix(e.Name(), ext)
+		tier, ok := strings.CutSuffix(e.Name(), h.agentExt)
 		if !ok || !e.Type().IsRegular() || !r.mode.releases() && slices.ContainsFunc(defs, func(d agentDef) bool { return d.Tier == tier }) {
 			continue
 		}
@@ -444,6 +426,6 @@ func (r *run) pruneAgents(harness string, defs []agentDef) {
 		if err != nil || !managed(string(raw)) {
 			continue
 		}
-		r.retire("agent", tier, harness, path, "orphaned")
+		r.retire("agent", tier, h.Key, path, "orphaned")
 	}
 }

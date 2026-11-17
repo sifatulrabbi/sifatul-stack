@@ -661,3 +661,18 @@ func TestUnlinkRestoresTheNewestBackupItMade(t *testing.T) {
 		t.Errorf("older backup changed: %q", got)
 	}
 }
+
+func TestRunRefusesAnUnknownHarness(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	run(t, s, stack.Link)
+	s.Selected = []string{"claude", "gemini"}
+
+	for _, mode := range []stack.Mode{stack.Link, stack.Status, stack.Detach} {
+		if _, err := s.Run(mode); err == nil || !strings.Contains(err.Error(), "gemini") {
+			t.Errorf("%s err = %v, want one naming gemini", mode, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(s.Layout.OpenCode, "agents", "senior.md")); err != nil {
+		t.Error("an unknown harness removed OpenCode's agents")
+	}
+}

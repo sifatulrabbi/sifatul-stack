@@ -83,14 +83,12 @@ func defaultProviders(home, codexDir string) []usage.Provider {
 	}
 }
 
-var harnessBinaries = map[string]string{"claude": "claude", "codex": "codex", "opencode": "opencode"}
-
-func harnessFound(layout stack.Layout, lookPath func(string) (string, error)) func(string) bool {
-	return func(harness string) bool {
-		if _, err := os.Stat(layout.Dir(harness)); err == nil {
+func harnessFound(layout stack.Layout, lookPath func(string) (string, error)) func(stack.Harness) bool {
+	return func(h stack.Harness) bool {
+		if _, err := os.Stat(h.Dir(layout)); err == nil {
 			return true
 		}
-		_, err := lookPath(harnessBinaries[harness])
+		_, err := lookPath(h.Binary)
 		return err == nil
 	}
 }

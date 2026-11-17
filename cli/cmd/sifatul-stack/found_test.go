@@ -23,9 +23,13 @@ func TestHarnessFoundByConfigDirOrBinary(t *testing.T) {
 	}
 	found := harnessFound(layout, lookPath)
 
-	for h, want := range map[string]bool{"claude": true, "codex": false, "opencode": true} {
+	for key, want := range map[string]bool{"claude": true, "codex": false, "opencode": true} {
+		h, err := stack.Find(key)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if got := found(h); got != want {
-			t.Errorf("found(%s) = %v, want %v", h, got, want)
+			t.Errorf("found(%s) = %v, want %v", key, got, want)
 		}
 	}
 }

@@ -35,7 +35,7 @@ type stackEnv struct {
 	animate bool
 	home    string
 	choose  func(ctx context.Context, choices []ui.Choice) ([]string, error)
-	found   func(harness string) bool
+	found   func(h stack.Harness) bool
 }
 
 func (e stackEnv) tilde(s string) string {
@@ -160,9 +160,9 @@ func labels(harnesses []string) string {
 }
 
 func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source.State, hasPrev bool) ([]string, error) {
-	last := stack.Harnesses
-	if hasPrev && len(prev.Harnesses) > 0 {
-		last = prev.Harnesses
+	last := stack.Chosen(nil)
+	if hasPrev {
+		last = stack.Chosen(prev.Harnesses)
 	}
 	switch {
 	case cmd.Flags().Changed("harness"):
@@ -170,8 +170,9 @@ func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source
 	case e.choose == nil:
 		return last, nil
 	}
-	choices := make([]ui.Choice, len(stack.Harnesses))
-	for i, h := range stack.Harnesses {
+	harnesses := stack.All()
+	choices := make([]ui.Choice, len(harnesses))
+	for i, h := range harnesses {
 		found := e.found != nil && e.found(h)
 		hint := "not found"
 		if found {
@@ -179,11 +180,11 @@ func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source
 		}
 		on := found
 		if hasPrev {
-			on = slices.Contains(last, h)
+			on = slices.Contains(last, h.Key)
 		}
 		choices[i] = ui.Choice{
-			Key: h, Label: stack.HarnessLabel(h), Detail: e.tilde(e.layout.Dir(h)), Hint: hint,
-			On: on, Was: hasPrev && slices.Contains(last, h),
+			Key: h.Key, Label: h.Label, Detail: e.tilde(h.Dir(e.layout)), Hint: hint,
+			On: on, Was: hasPrev && slices.Contains(last, h.Key),
 		}
 	}
 	chosen, err := e.choose(cmd.Context(), choices)
@@ -280,10 +281,7 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 			if st.Managed {
 				kind = "managed clone"
 			}
-			chosen := st.Harnesses
-			if len(chosen) == 0 {
-				chosen = stack.Harnesses
-			}
+			chosen := stack.Chosen(st.Harnesses)
 			e.print(w, ui.Columns([][]string{
 				{ui.Accent.Render(brand), kind + ui.Muted.Render(" · "+st.Source)},
 				{ui.Accent.Render("Harnesses"), labels(chosen)},

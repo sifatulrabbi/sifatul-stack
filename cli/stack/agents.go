@@ -8,35 +8,6 @@ import (
 	"strings"
 )
 
-var Harnesses = []string{"claude", "codex", "opencode"}
-
-var harnessLabels = map[string]string{"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode", "agents": "~/.agents"}
-
-func HarnessLabel(harness string) string {
-	if l, ok := harnessLabels[harness]; ok {
-		return l
-	}
-	return harness
-}
-
-func ParseHarnesses(names []string) ([]string, error) {
-	var want []string
-	for _, n := range names {
-		n = strings.ToLower(strings.TrimSpace(n))
-		if n == "" {
-			continue
-		}
-		if !slices.Contains(Harnesses, n) {
-			return nil, fmt.Errorf("unknown harness %q; choose from %s", n, strings.Join(Harnesses, ", "))
-		}
-		want = append(want, n)
-	}
-	if len(want) == 0 {
-		return nil, fmt.Errorf("choose at least one harness from %s", strings.Join(Harnesses, ", "))
-	}
-	return slices.DeleteFunc(slices.Clone(Harnesses), func(h string) bool { return !slices.Contains(want, h) }), nil
-}
-
 type model struct {
 	Name   string
 	Effort string
@@ -65,8 +36,8 @@ func loadAgents(source string) ([]agentDef, error) {
 			continue
 		}
 		f := strings.Split(line, "\t")
-		if len(f) != 4 || !slices.Contains(Harnesses, f[1]) {
-			return nil, fmt.Errorf("agents/models.tsv line %d: want tier, harness (one of %v), model, effort separated by tabs", i+1, Harnesses)
+		if len(f) != 4 || !slices.Contains(keys(table), f[1]) {
+			return nil, fmt.Errorf("agents/models.tsv line %d: want tier, harness (one of %v), model, effort separated by tabs", i+1, keys(table))
 		}
 		at := slices.IndexFunc(defs, func(d agentDef) bool { return d.Tier == f[0] })
 		if at < 0 {
@@ -117,7 +88,7 @@ func (d *agentDef) load(dir, shared string) error {
 	case strings.Contains(d.Prompt, "'''"):
 		return fmt.Errorf("%s or agents/shared.md: prompts must not contain three single quotes", file)
 	}
-	for _, h := range Harnesses {
+	for _, h := range keys(table) {
 		if m, ok := d.Models[h]; !ok || m.Name == "" || m.Effort == "" {
 			return fmt.Errorf("agents/models.tsv lacks a model or effort for %s on %s", d.Tier, h)
 		}
@@ -125,22 +96,26 @@ func (d *agentDef) load(dir, shared string) error {
 	return nil
 }
 
-func (d agentDef) render(harness string, enabled bool) (string, error) {
-	m := d.Models[harness]
+func finish(b *strings.Builder) string { return strings.TrimRight(b.String(), "\n") + "\n" }
+
+func renderClaude(d agentDef, m model, _ bool) string {
 	var b strings.Builder
-	switch harness {
-	case "claude":
-		fmt.Fprintf(&b, "---\n%s\nname: %s\ndescription: \"%s\"\nmodel: %s\neffort: %s\n---\n%s", Mark, d.Tier, d.Description, m.Name, m.Effort, d.Prompt)
-	case "codex":
-		fmt.Fprintf(&b, "%s\nname = \"%s\"\ndescription = \"%s\"\nmodel = \"%s\"\nmodel_reasoning_effort = \"%s\"\ndeveloper_instructions = '''\n%s'''\n", Mark, d.Tier, d.Description, m.Name, m.Effort, d.Prompt)
-	case "opencode":
-		fmt.Fprintf(&b, "---\n%s\ndescription: \"%s\"\nmode: subagent\nmodel: %s\nreasoningEffort: %s\n", Mark, d.Description, m.Name, m.Effort)
-		if !enabled {
-			b.WriteString("disabled: true\n")
-		}
-		fmt.Fprintf(&b, "---\n%s", d.Prompt)
-	default:
-		return "", fmt.Errorf("unknown harness %q", harness)
+	fmt.Fprintf(&b, "---\n%s\nname: %s\ndescription: \"%s\"\nmodel: %s\neffort: %s\n---\n%s", Mark, d.Tier, d.Description, m.Name, m.Effort, d.Prompt)
+	return finish(&b)
+}
+
+func renderCodex(d agentDef, m model, _ bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\nname = \"%s\"\ndescription = \"%s\"\nmodel = \"%s\"\nmodel_reasoning_effort = \"%s\"\ndeveloper_instructions = '''\n%s'''\n", Mark, d.Tier, d.Description, m.Name, m.Effort, d.Prompt)
+	return finish(&b)
+}
+
+func renderOpenCode(d agentDef, m model, enabled bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "---\n%s\ndescription: \"%s\"\nmode: subagent\nmodel: %s\nreasoningEffort: %s\n", Mark, d.Description, m.Name, m.Effort)
+	if !enabled {
+		b.WriteString("disabled: true\n")
 	}
-	return strings.TrimRight(b.String(), "\n") + "\n", nil
+	fmt.Fprintf(&b, "---\n%s", d.Prompt)
+	return finish(&b)
 }
