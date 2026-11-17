@@ -2,6 +2,7 @@ package stack
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -329,11 +330,50 @@ func managed(content string) bool {
 	return slices.Contains(strings.Split(content, "\n"), Mark)
 }
 
+func readAgent(path string) (raw string, present bool, err error) {
+	fi, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "", false, nil
+	case err != nil:
+		return "", true, err
+	case !fi.Mode().IsRegular():
+		return "", true, fmt.Errorf("%s is not a regular file", path)
+	}
+	b, err := os.ReadFile(path)
+	return string(b), true, err
+}
+
+func writeFile(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
 func (r *run) syncAgent(d agentDef, harness string) error {
 	dst := r.agentPath(d.Tier, harness)
-	raw, err := os.ReadFile(dst)
-	present := err == nil
-	if present && !managed(string(raw)) {
+	text, present, err := readAgent(dst)
+	if err != nil {
+		if r.mode != Unlink {
+			r.conflict("agent", d.Tier, harness, err.Error())
+		}
+		return nil
+	}
+	if present && !managed(text) {
 		if r.mode != Unlink {
 			r.conflict("agent", d.Tier, harness, dst+" is not managed by sifatul-stack")
 		}
@@ -349,7 +389,7 @@ func (r *run) syncAgent(d agentDef, harness string) error {
 		}
 		return nil
 	}
-	enabled := harness != "opencode" || (present && !slices.Contains(strings.Split(string(raw), "\n"), "disabled: true"))
+	enabled := harness != "opencode" || (present && !slices.Contains(strings.Split(text, "\n"), "disabled: true"))
 	wanted, err := d.render(harness, enabled)
 	if err != nil {
 		return err
@@ -358,7 +398,7 @@ func (r *run) syncAgent(d agentDef, harness string) error {
 	switch {
 	case !present:
 		state = "missing"
-	case string(raw) == wanted:
+	case text == wanted:
 		state = "current"
 	}
 	change := ""
@@ -367,7 +407,7 @@ func (r *run) syncAgent(d agentDef, harness string) error {
 			r.fail("agent", d.Tier, harness, err)
 			return nil
 		}
-		if err := os.WriteFile(dst, []byte(wanted), 0o644); err != nil {
+		if err := writeFile(dst, []byte(wanted)); err != nil {
 			r.fail("agent", d.Tier, harness, err)
 			return nil
 		}

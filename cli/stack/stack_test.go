@@ -547,3 +547,53 @@ func TestParseHarnesses(t *testing.T) {
 		t.Error("an empty selection should be refused")
 	}
 }
+
+func TestLinkDoesNotWriteThroughForeignAgentSymlink(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	target := filepath.Join(t.TempDir(), "elsewhere.md")
+	link := filepath.Join(s.Layout.Claude, "agents", "senior.md")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	r := run(t, s, stack.Link)
+
+	if _, err := os.Stat(target); err == nil {
+		t.Errorf("rendered agent was written through a foreign symlink to %s", target)
+	}
+	if got, _ := os.Readlink(link); got != target {
+		t.Errorf("foreign symlink was replaced: %q", got)
+	}
+	if !slices.ContainsFunc(r.Rows, func(row stack.Row) bool {
+		return row.Conflict && row.Kind == "agent" && row.Name == "senior" && row.Harness == "claude"
+	}) {
+		t.Errorf("foreign symlink not reported as a conflict: %+v", r.Rows)
+	}
+}
+
+func TestLinkDoesNotOverwriteUnreadableForeignAgent(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	s := newSyncer(t, repoRoot(t))
+	foreign := filepath.Join(s.Layout.Claude, "agents", "senior.md")
+	write(t, foreign, "my own senior\n")
+	if err := os.Chmod(foreign, 0o200); err != nil {
+		t.Fatal(err)
+	}
+
+	r := run(t, s, stack.Link)
+
+	if err := os.Chmod(foreign, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, foreign); got != "my own senior\n" {
+		t.Errorf("unreadable foreign agent was overwritten:\n%.80s", got)
+	}
+	if r.Conflicts() != 1 {
+		t.Errorf("conflicts = %d, want 1: %+v", r.Conflicts(), r.Rows)
+	}
+}
