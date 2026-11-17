@@ -371,13 +371,51 @@ func TestPruneLeavesForeignFilesAlone(t *testing.T) {
 	}
 }
 
-func TestRejectsDescriptionsThatBreakQuoting(t *testing.T) {
-	src := fixtureSource(t)
-	senior := filepath.Join(src, "agents", "senior.md")
-	write(t, senior, strings.Replace(read(t, senior), "description: ", "description: a \"quoted\" ", 1))
+func TestRejectsAgentTextThatBreaksQuoting(t *testing.T) {
+	for name, edit := range map[string]func(string) string{
+		"double quote": func(s string) string { return strings.Replace(s, "description: ", `description: a "quoted" `, 1) },
+		"backslash":    func(s string) string { return strings.Replace(s, "description: ", `description: a\b `, 1) },
+		"triple quote": func(s string) string { return s + "\n'''\n" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := fixtureSource(t)
+			senior := filepath.Join(src, "agents", "senior.md")
+			write(t, senior, edit(read(t, senior)))
+			if _, err := newSyncer(t, src).Run(stack.Link); err == nil || !strings.Contains(err.Error(), "senior") {
+				t.Errorf("err = %v, want one naming senior", err)
+			}
+		})
+	}
+}
 
-	if _, err := newSyncer(t, src).Run(stack.Link); err == nil || !strings.Contains(err.Error(), "senior") {
-		t.Errorf("err = %v, want one naming senior", err)
+func TestRejectsModelsTSVFieldsThatEscape(t *testing.T) {
+	for name, field := range map[string]struct {
+		at    int
+		value string
+	}{
+		"tier traversal":   {0, "../config"},
+		"tier uppercase":   {0, "Senior"},
+		"model newline":    {2, "opus\rpermissionMode: bypassPermissions"},
+		"model quote":      {2, `gpt"`},
+		"model space":      {2, "gpt 5"},
+		"effort quote":     {3, `high"`},
+		"effort backslash": {3, `high\`},
+		"empty model":      {2, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := fixtureSource(t)
+			tsv := filepath.Join(src, "agents", "models.tsv")
+			lines := strings.Split(read(t, tsv), "\n")
+			f := strings.Split(lines[1], "\t")
+			f[field.at] = field.value
+			lines[1] = strings.Join(f, "\t")
+			write(t, tsv, strings.Join(lines, "\n"))
+			s := newSyncer(t, src)
+			if _, err := s.Run(stack.Link); err == nil || !strings.Contains(err.Error(), "models.tsv") {
+				t.Errorf("err = %v, want one naming models.tsv", err)
+			}
+			assertMissing(t, filepath.Join(s.Layout.Codex, "config.toml"))
+		})
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -19,6 +20,11 @@ type agentDef struct {
 	Prompt      string
 	Models      map[string]model
 }
+
+var (
+	tierName   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	modelValue = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
+)
 
 func loadAgents(source string) ([]agentDef, error) {
 	dir := filepath.Join(source, "agents")
@@ -38,6 +44,9 @@ func loadAgents(source string) ([]agentDef, error) {
 		f := strings.Split(line, "\t")
 		if len(f) != 4 || !slices.Contains(keys(table), f[1]) {
 			return nil, fmt.Errorf("agents/models.tsv line %d: want tier, harness (one of %v), model, effort separated by tabs", i+1, keys(table))
+		}
+		if !tierName.MatchString(f[0]) || !modelValue.MatchString(f[2]) || !modelValue.MatchString(f[3]) {
+			return nil, fmt.Errorf("agents/models.tsv line %d: tier must match %s, model and effort %s", i+1, tierName, modelValue)
 		}
 		at := slices.IndexFunc(defs, func(d agentDef) bool { return d.Tier == f[0] })
 		if at < 0 {
