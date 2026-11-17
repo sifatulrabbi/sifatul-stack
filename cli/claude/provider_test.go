@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -197,5 +198,47 @@ func TestDisabledExtraUsageIsOmitted(t *testing.T) {
 	}
 	if len(windows) != 1 || windows[0].Name != "session" {
 		t.Fatalf("windows = %+v", windows)
+	}
+}
+
+func TestCredentialsWithoutExpiryReachTheEndpoint(t *testing.T) {
+	for _, raw := range []string{`{"claudeAiOauth":{"accessToken":"tok"}}`, `{"claudeAiOauth":{"accessToken":"tok","expiresAt":0}}`, `{"claudeAiOauth":{"accessToken":"tok","expiresAt":-1}}`} {
+		creds, err := ParseCredentials([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		called := false
+		p := newProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+			called = true
+			w.Write([]byte(sampleUsage))
+		}, creds)
+
+		if _, err := p.Usage(context.Background()); err != nil || !called {
+			t.Errorf("%s: called = %v, err = %v", raw, called, err)
+		}
+	}
+}
+
+func TestRejectedTokenSaysToOpenClaudeCode(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		p := newProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(status)
+		}, validCreds())
+
+		_, err := p.Usage(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "open Claude Code once to refresh it") || !strings.Contains(err.Error(), strconv.Itoa(status)) {
+			t.Errorf("HTTP %d: err = %v", status, err)
+		}
+	}
+}
+
+func TestServerErrorsGetNoRefreshHint(t *testing.T) {
+	p := newProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}, validCreds())
+
+	_, err := p.Usage(context.Background())
+	if err == nil || strings.Contains(err.Error(), "open Claude Code") {
+		t.Fatalf("err = %v", err)
 	}
 }

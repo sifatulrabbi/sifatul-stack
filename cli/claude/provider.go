@@ -14,7 +14,10 @@ import (
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
 )
 
-const DefaultBaseURL = "https://api.anthropic.com"
+const (
+	DefaultBaseURL = "https://api.anthropic.com"
+	refreshHint    = "open Claude Code once to refresh it"
+)
 
 type Provider struct {
 	Credentials CredentialStore
@@ -31,7 +34,7 @@ func (p Provider) Usage(ctx context.Context) (usage.Report, error) {
 		return usage.Report{}, err
 	}
 	if !creds.ExpiresAt.IsZero() && p.Now().After(creds.ExpiresAt) {
-		return usage.Report{}, fmt.Errorf("claude: access token expired at %s (open Claude Code once to refresh it)", creds.ExpiresAt.Format(time.RFC3339))
+		return usage.Report{}, fmt.Errorf("claude: access token expired at %s (%s)", creds.ExpiresAt.Format(time.RFC3339), refreshHint)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.BaseURL+"/api/oauth/usage", nil)
@@ -55,6 +58,9 @@ func (p Provider) Usage(ctx context.Context) (usage.Report, error) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return usage.Report{}, fmt.Errorf("claude: read usage: %w", err)
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return usage.Report{}, fmt.Errorf("claude: usage endpoint returned HTTP %d (%s)", resp.StatusCode, refreshHint)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return usage.Report{}, fmt.Errorf("claude: usage endpoint returned HTTP %d", resp.StatusCode)

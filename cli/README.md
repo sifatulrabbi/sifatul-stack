@@ -27,7 +27,7 @@ Exit code: `0` all providers reported, `1` at least one provider failed (its rep
 | claude | `GET https://api.anthropic.com/api/oauth/usage` with `anthropic-beta: oauth-2025-04-20` (same data as `/usage` in Claude Code) | none | Claude Code's OAuth token from the macOS Keychain item `Claude Code-credentials`, else `~/.claude/.credentials.json` |
 | codex | `codex app-server` JSON-RPC: `initialize` → `initialized` → `account/rateLimits/read` | latest `token_count` event in `~/.codex/sessions/**/rollout-*.jsonl` (marked `source: rollout-cache` with `as_of`) | owned by the Codex binary, which refreshes its own token |
 
-The tool never refreshes or writes credentials. An expired Claude token produces an error that says to open Claude Code once.
+The tool never refreshes or writes credentials. An expired or rejected (HTTP 401/403) Claude token produces an error that says to open Claude Code once. When the Codex app-server outlasts `--timeout`, the rollout fallback still gets its own 2s to read the cache.
 
 Neither usage endpoint is a documented public API. Both are what the official clients call, so field names may drift. The parsers ignore unknown fields, and the Claude parser prefers the newer `limits[]` array, falling back to the legacy `five_hour` / `seven_day*` fields.
 

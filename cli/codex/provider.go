@@ -21,6 +21,8 @@ type SnapshotSource interface {
 	Read(ctx context.Context) (Reading, error)
 }
 
+const FallbackBudget = 2 * time.Second
+
 var ErrNoSnapshot = errors.New("codex: no rate-limit snapshot available")
 
 type Provider struct {
@@ -36,8 +38,14 @@ func (p Provider) Usage(ctx context.Context) (usage.Report, error) {
 		if p.Fallback == nil {
 			return usage.Report{}, liveErr
 		}
+		fbCtx := ctx
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			var cancel context.CancelFunc
+			fbCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), FallbackBudget)
+			defer cancel()
+		}
 		var fbErr error
-		reading, fbErr = p.Fallback.Read(ctx)
+		reading, fbErr = p.Fallback.Read(fbCtx)
 		if fbErr != nil {
 			return usage.Report{}, fmt.Errorf("%w; fallback: %w", liveErr, fbErr)
 		}

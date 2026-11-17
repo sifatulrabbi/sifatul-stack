@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sifatulrabbi/sifatul-stack/cli/codex"
 	"github.com/sifatulrabbi/sifatul-stack/cli/render"
 	"github.com/sifatulrabbi/sifatul-stack/cli/ui"
 	"github.com/sifatulrabbi/sifatul-stack/cli/usage"
@@ -104,7 +105,7 @@ func newUsageCmd(a app) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print compact one-line JSON for agents (rounded percents, precomputed resets_in_s)")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "with --json: print the full, indented report (for debugging)")
-	cmd.Flags().DurationVar(&timeout, "timeout", 15*time.Second, "overall timeout")
+	cmd.Flags().DurationVar(&timeout, "timeout", 15*time.Second, fmt.Sprintf("timeout for live sources; the Codex rollout fallback gets %s more", codex.FallbackBudget))
 	return cmd
 }
 
