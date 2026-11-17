@@ -38,10 +38,7 @@ type Repo struct {
 
 func (r Repo) Ensure(ctx context.Context) (cloned bool, err error) {
 	if _, err := os.Stat(r.Dir); errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(filepath.Dir(r.Dir), 0o755); err != nil {
-			return false, err
-		}
-		if _, err := r.Git(ctx, "clone", "--quiet", r.URL, r.Dir); err != nil {
+		if err := r.clone(ctx); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -49,7 +46,25 @@ func (r Repo) Ensure(ctx context.Context) (cloned bool, err error) {
 	if _, err := r.git(ctx, "rev-parse", "--is-inside-work-tree"); err != nil {
 		return false, fmt.Errorf("%s exists but is not a git clone: %w", r.Dir, err)
 	}
+	if _, err := r.git(ctx, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
+		return false, fmt.Errorf("%s has nothing checked out, likely from an interrupted clone; delete %s and rerun setup", r.Dir, r.Dir)
+	}
 	return false, nil
+}
+
+func (r Repo) clone(ctx context.Context) error {
+	if err := os.MkdirAll(filepath.Dir(r.Dir), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(filepath.Dir(r.Dir), "."+filepath.Base(r.Dir)+".clone-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	if _, err := r.Git(ctx, "clone", "--quiet", r.URL, tmp); err != nil {
+		return err
+	}
+	return os.Rename(tmp, r.Dir)
 }
 
 type Change struct {
