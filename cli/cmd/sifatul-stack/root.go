@@ -21,12 +21,24 @@ var (
 	errOutput         = errors.New("write output")
 )
 
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e exitError) Error() string { return e.err.Error() }
+func (e exitError) Unwrap() error { return e.err }
+
+func failed(err error) error { return exitError{code: 1, err: err} }
+
 func exitCode(err error) int {
+	var exit exitError
 	switch {
 	case err == nil:
 		return 0
-	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput),
-		errors.Is(err, errStack), errors.Is(err, errConflicts):
+	case errors.As(err, &exit):
+		return exit.code
+	case errors.Is(err, errProviderFailed), errors.Is(err, errOutput), errors.Is(err, errConflicts):
 		return 1
 	default:
 		return 2

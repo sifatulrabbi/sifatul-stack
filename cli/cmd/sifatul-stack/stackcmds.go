@@ -22,7 +22,6 @@ import (
 const brand = "sifatul-stack"
 
 var (
-	errStack     = errors.New("stack")
 	errConflicts = errors.New("resolve the conflicts above and rerun")
 )
 
@@ -77,7 +76,7 @@ func (e stackEnv) sync(w io.Writer, st source.State, mode stack.Mode) error {
 		return fmt.Errorf("%w: %w", errOutput, werr)
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %w", errStack, err)
+		return failed(err)
 	}
 	if r.Conflicts() > 0 {
 		return errConflicts
@@ -88,7 +87,7 @@ func (e stackEnv) sync(w io.Writer, st source.State, mode stack.Mode) error {
 func (e stackEnv) loadState() (source.State, error) {
 	st, err := source.LoadState(e.statePath())
 	if err != nil {
-		return st, fmt.Errorf("%w: %w", errStack, err)
+		return st, failed(err)
 	}
 	return st, nil
 }
@@ -131,7 +130,7 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 			e.note(w, ui.OK.Render("✓"), "installing into "+labels(chosen))
 			want, err := e.resolveSource(cmd, from)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errStack, err)
+				return failed(err)
 			}
 			want.Harnesses = chosen
 			if prevErr == nil && prev.Source != want.Source {
@@ -141,7 +140,7 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 				}
 			}
 			if err := source.SaveState(e.statePath(), want); err != nil {
-				return fmt.Errorf("%w: %w", errStack, err)
+				return failed(err)
 			}
 			return e.sync(w, want, stack.Link)
 		},
@@ -189,10 +188,10 @@ func (e stackEnv) chooseHarnesses(cmd *cobra.Command, flag []string, prev source
 	}
 	chosen, err := e.choose(cmd.Context(), choices)
 	if errors.Is(err, ui.ErrCanceled) {
-		return nil, fmt.Errorf("%w: setup canceled; nothing changed", errStack)
+		return nil, failed(errors.New("setup canceled; nothing changed"))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errStack, err)
+		return nil, failed(err)
 	}
 	return stack.ParseHarnesses(chosen)
 }
@@ -252,7 +251,7 @@ func newUpdateCmd(e stackEnv) *cobra.Command {
 					}
 				})
 				if err != nil {
-					return fmt.Errorf("%w: %w", errStack, err)
+					return failed(err)
 				}
 			} else {
 				e.note(w, ui.Warn.Render("•"), st.Source+" is your checkout; pull it yourself")
@@ -275,7 +274,7 @@ func newStatusCmd(e stackEnv) *cobra.Command {
 				return nil
 			}
 			if err != nil {
-				return fmt.Errorf("%w: %w", errStack, err)
+				return failed(err)
 			}
 			kind := "your checkout"
 			if st.Managed {
@@ -306,7 +305,7 @@ func newRemoveCmd(e stackEnv) *cobra.Command {
 				return err
 			}
 			if err := os.Remove(e.statePath()); err != nil {
-				return fmt.Errorf("%w: %w", errStack, err)
+				return failed(err)
 			}
 			if st.Managed {
 				e.note(w, ui.OK.Render("✓"), "removed; the clone at "+st.Source+" stays for the next setup")

@@ -106,11 +106,8 @@ func (f fixture) run(args ...string) (string, int) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs(args)
-	err := cmd.ExecuteContext(context.Background())
-	if err != nil {
-		out.WriteString("Error: " + err.Error() + "\n")
-	}
-	return out.String(), exitCode(err)
+	code := finish(&out, cmd.ExecuteContext(context.Background()))
+	return out.String(), code
 }
 
 func (f fixture) mustRun(args ...string) string {
@@ -477,5 +474,13 @@ func TestStaleAgentsShowAsStaleThenReRenderedThroughTheRealSyncer(t *testing.T) 
 		if !strings.Contains(update, want) {
 			t.Errorf("update lacks %q:\n%s", want, update)
 		}
+	}
+}
+
+func TestStackErrorsCarryNoInternalPrefix(t *testing.T) {
+	f := newFixture(t)
+	out, code := f.run("update")
+	if code != 1 || strings.Contains(out, "stack: ") || !strings.Contains(out, "✗ error: sifatul-stack is not set up") {
+		t.Fatalf("exit = %d, out = %q", code, out)
 	}
 }
