@@ -119,7 +119,7 @@ func StackStatus(rows []stack.Row) string {
 		out += "\n" + c
 	}
 	if needsUpdate {
-		out += "\n" + ui.Muted.Render("run `sifatul-stack update` to fix what is missing, stale, or left over") + "\n"
+		out += "\n" + ui.Muted.Render("run `sifatul-stack install` to fix what is missing, stale, or left over") + "\n"
 	}
 	return out
 }

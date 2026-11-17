@@ -60,12 +60,12 @@ var version = "dev"
 func newRootCmd(a app) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "sifatul-stack",
-		Short:         "Set up and update Sifatul's agent stack, and report coding-agent usage",
+		Short:         "Install Sifatul's agent stack and report coding-agent usage",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
 	}
-	root.AddCommand(newSetupCmd(a.stack), newUpdateCmd(a.stack), newStatusCmd(a.stack), newRemoveCmd(a.stack), newUsageCmd(a))
+	root.AddCommand(newInstallCmd(a.stack), newStatusCmd(a.stack), newUsageCmd(a))
 	return root
 }
 

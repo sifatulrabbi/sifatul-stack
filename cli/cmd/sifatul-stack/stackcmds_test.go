@@ -139,9 +139,9 @@ func linkTarget(t *testing.T, path string) string {
 	return target
 }
 
-func TestSetupClonesAndLinks(t *testing.T) {
+func TestInstallClonesAndLinks(t *testing.T) {
 	f := newFixture(t)
-	out := f.mustRun("setup")
+	out := f.mustRun("install")
 
 	if !strings.Contains(out, "sifatul-stack · cloned "+f.upstream) {
 		t.Errorf("output lacks the clone line:\n%s", out)
@@ -156,14 +156,14 @@ func TestSetupClonesAndLinks(t *testing.T) {
 	if err != nil || st.Source != f.clone() || !st.Managed || !slices.Equal(st.Harnesses, stack.Harnesses) {
 		t.Errorf("state = %+v %v", st, err)
 	}
-	if out := f.mustRun("setup"); !strings.Contains(out, "sifatul-stack · using the clone at ~/.local/share/sifatul-stack/stack") {
-		t.Errorf("second setup should reuse the clone:\n%s", out)
+	if out := f.mustRun("install"); !strings.Contains(out, "sifatul-stack · already up to date") {
+		t.Errorf("second install should pull the existing clone:\n%s", out)
 	}
 }
 
-func TestUpdatePullsAndResyncs(t *testing.T) {
+func TestInstallPullsTheLatestAndResyncs(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup")
+	f.mustRun("install")
 	f.commit(func(dir string) {
 		writeFile(t, filepath.Join(dir, "skills", "fresh", "SKILL.md"), "---\nname: fresh\ndescription: new\n---\n")
 		if err := os.RemoveAll(filepath.Join(dir, "skills", "full-review")); err != nil {
@@ -173,10 +173,10 @@ func TestUpdatePullsAndResyncs(t *testing.T) {
 		writeFile(t, tsv, strings.Replace(readFile(t, tsv), "senior\tclaude\topus\t", "senior\tclaude\topus-next\t", 1))
 	})
 
-	out := f.mustRun("update")
+	out := f.mustRun("install")
 
 	if !strings.Contains(out, "sifatul-stack · updated ") {
-		t.Errorf("output lacks the update line:\n%s", out)
+		t.Errorf("output lacks the pull line:\n%s", out)
 	}
 	if got := linkTarget(t, filepath.Join(f.env.layout.AgentsSkills, "fresh")); got != filepath.Join(f.clone(), "skills", "fresh") {
 		t.Errorf("new skill links to %s", got)
@@ -187,53 +187,57 @@ func TestUpdatePullsAndResyncs(t *testing.T) {
 	if !strings.Contains(readFile(t, filepath.Join(f.env.layout.Claude, "agents", "senior.md")), "\nmodel: opus-next\n") {
 		t.Error("senior was not re-rendered")
 	}
-	if out := f.mustRun("update"); !strings.Contains(out, "sifatul-stack · already up to date") {
-		t.Errorf("second update:\n%s", out)
+	if out := f.mustRun("install"); !strings.Contains(out, "sifatul-stack · already up to date") {
+		t.Errorf("second install:\n%s", out)
 	}
 }
 
-func TestUpdateRefusesADirtyClone(t *testing.T) {
+func TestInstallRefusesADirtyClone(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup")
+	f.mustRun("install")
 	writeFile(t, filepath.Join(f.clone(), "agents", "shared.md"), "local edit\n")
 
-	out, code := f.run("update")
+	out, code := f.run("install")
 	if code != 1 || !strings.Contains(out, "local changes") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 }
 
-func TestUpdateBeforeSetupPointsToSetup(t *testing.T) {
+func TestStatusBeforeInstallPointsToInstall(t *testing.T) {
 	f := newFixture(t)
-	out, code := f.run("update")
-	if code != 1 || !strings.Contains(out, "sifatul-stack setup") {
-		t.Errorf("exit %d:\n%s", code, out)
-	}
-	if out := f.mustRun("status"); !strings.Contains(out, "not set up") {
-		t.Errorf("status before setup:\n%s", out)
+	if out := f.mustRun("status"); !strings.Contains(out, "not installed; run `sifatul-stack install`") {
+		t.Errorf("status before install:\n%s", out)
 	}
 }
 
-func TestSetupFromCheckoutLinksItAndUpdateLeavesItAlone(t *testing.T) {
+func TestOnlyInstallAndStatusManageTheStack(t *testing.T) {
 	f := newFixture(t)
-	out := f.mustRun("setup", "--from", f.upstream)
+	for _, gone := range []string{"setup", "update", "remove"} {
+		if _, code := f.run(gone); code != 2 {
+			t.Errorf("%s exited %d, want 2 (unknown command)", gone, code)
+		}
+	}
+}
+
+func TestInstallFromCheckoutLinksItAndLeavesPullingToYou(t *testing.T) {
+	f := newFixture(t)
+	out := f.mustRun("install", "--from", f.upstream)
 
 	if got := linkTarget(t, filepath.Join(f.env.layout.Claude, "skills", "full-review")); got != filepath.Join(f.upstream, "skills", "full-review") {
 		t.Errorf("skill links to %s", got)
 	}
 	if _, err := os.Stat(f.clone()); err == nil {
-		t.Error("setup --from cloned anyway")
+		t.Error("install --from cloned anyway")
 	}
-	out = f.mustRun("update")
 	if !strings.Contains(out, "pull it yourself") {
-		t.Errorf("update on a checkout:\n%s", out)
+		t.Errorf("install from a checkout:\n%s", out)
 	}
 }
 
-func TestSetupSwitchesSources(t *testing.T) {
+func TestInstallSwitchesSources(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup", "--from", f.upstream)
-	out := f.mustRun("setup")
+	f.mustRun("install", "--from", f.upstream)
+	out := f.mustRun("install")
 
 	if !strings.Contains(out, "sifatul-stack · switching from "+f.upstream) {
 		t.Errorf("output lacks the switch line:\n%s", out)
@@ -253,27 +257,24 @@ func noBackups(t *testing.T, root string) {
 	})
 }
 
-func TestRemoveForgetsStateAndRestoresNothing(t *testing.T) {
+func TestDroppingAHarnessRestoresNothing(t *testing.T) {
 	f := newFixture(t)
 	claudeMD := filepath.Join(f.env.layout.Claude, "CLAUDE.md")
 	writeFile(t, claudeMD, "old global\n")
-	f.mustRun("setup")
+	f.mustRun("install")
 
-	f.mustRun("remove")
+	f.mustRun("install", "--harness", "codex")
 
 	if _, err := os.Lstat(claudeMD); err == nil {
-		t.Error("CLAUDE.md is back after remove")
+		t.Error("CLAUDE.md is back after dropping Claude Code")
 	}
 	noBackups(t, f.env.home)
-	if _, err := os.Stat(f.env.statePath()); err == nil {
-		t.Error("state survived remove")
-	}
-	if _, err := os.Stat(f.clone()); err != nil {
-		t.Error("remove deleted the clone")
+	if got := f.state().Harnesses; !slices.Equal(got, []string{"codex"}) {
+		t.Errorf("state harnesses = %v", got)
 	}
 }
 
-func TestSetupReportsFailuresWithExitOne(t *testing.T) {
+func TestInstallReportsFailuresWithExitOne(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root writes everywhere")
 	}
@@ -287,13 +288,13 @@ func TestSetupReportsFailuresWithExitOne(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0o755) })
 
-	out, code := f.run("setup", "--harness", "claude")
+	out, code := f.run("install", "--harness", "claude")
 	if code != 1 || !strings.Contains(out, "! 4 failed") || !strings.Contains(out, "agent senior · Claude Code") || !strings.Contains(out, "fix the errors above and rerun") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 }
 
-func TestSetupReplacesWhateverSitsAtATargetPath(t *testing.T) {
+func TestInstallReplacesWhateverSitsAtATargetPath(t *testing.T) {
 	plants := map[string]func(t *testing.T, path string){
 		"file": func(t *testing.T, path string) { writeFile(t, path, "mine\n") },
 		"dir":  func(t *testing.T, path string) { writeFile(t, filepath.Join(path, "inside"), "mine\n") },
@@ -319,7 +320,7 @@ func TestSetupReplacesWhateverSitsAtATargetPath(t *testing.T) {
 				plant(t, p)
 			}
 
-			f.mustRun("setup")
+			f.mustRun("install")
 
 			if got := linkTarget(t, skill); got != filepath.Join(f.clone(), "skills", "full-review") {
 				t.Errorf("skill links to %s", got)
@@ -337,7 +338,7 @@ func TestSetupReplacesWhateverSitsAtATargetPath(t *testing.T) {
 
 func TestStatusReportsAForeignThingWithoutChangingIt(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup")
+	f.mustRun("install")
 	codexMD := filepath.Join(f.env.layout.Codex, "AGENTS.md")
 	if err := os.Remove(codexMD); err != nil {
 		t.Fatal(err)
@@ -346,7 +347,7 @@ func TestStatusReportsAForeignThingWithoutChangingIt(t *testing.T) {
 
 	out := f.mustRun("status")
 
-	if !strings.Contains(out, "~ stale") || !strings.Contains(out, "run `sifatul-stack update`") {
+	if !strings.Contains(out, "~ stale") || !strings.Contains(out, "run `sifatul-stack install`") {
 		t.Errorf("status:\n%s", out)
 	}
 	if readFile(t, codexMD) != "mine\n" {
@@ -379,27 +380,27 @@ func dropTier(t *testing.T, dir, tier string) {
 
 func TestStateRecordsTheRenderedAgents(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup")
+	f.mustRun("install")
 	if got := f.state().Agents; !slices.Equal(got, allTiers) {
-		t.Errorf("after setup agents = %v, want %v", got, allTiers)
+		t.Errorf("after the first install agents = %v, want %v", got, allTiers)
 	}
 	f.commit(func(dir string) { dropTier(t, dir, "associate") })
 
-	f.mustRun("update")
+	f.mustRun("install")
 
 	if got := f.state().Agents; !slices.Equal(got, allTiers[:3]) {
-		t.Errorf("after update agents = %v, want %v", got, allTiers[:3])
+		t.Errorf("after the second install agents = %v, want %v", got, allTiers[:3])
 	}
 }
 
-func TestUpdatePrunesATierDroppedFromModelsTSV(t *testing.T) {
+func TestInstallPrunesATierDroppedFromModelsTSV(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup")
+	f.mustRun("install")
 	mine := filepath.Join(f.env.layout.Codex, "agents", "my-helper.toml")
 	writeFile(t, mine, "name = \"my-helper\"\n")
 	f.commit(func(dir string) { dropTier(t, dir, "associate") })
 
-	out := f.mustRun("update")
+	out := f.mustRun("install")
 
 	for _, p := range []string{
 		filepath.Join(f.env.layout.Claude, "agents", "associate.md"),
@@ -407,49 +408,48 @@ func TestUpdatePrunesATierDroppedFromModelsTSV(t *testing.T) {
 		filepath.Join(f.env.layout.OpenCode, "agents", "associate.md"),
 	} {
 		if _, err := os.Lstat(p); err == nil {
-			t.Errorf("%s survived the update", p)
+			t.Errorf("%s survived the install", p)
 		}
 	}
 	if !strings.Contains(out, "− pruned  associate") {
-		t.Errorf("update output lacks the prune:\n%s", out)
+		t.Errorf("install output lacks the prune:\n%s", out)
 	}
 	if readFile(t, mine) != "name = \"my-helper\"\n" {
 		t.Error("a user agent with an unrelated name was changed")
 	}
 }
 
-func TestRemoveDeletesOnlyTheAgentsItOwns(t *testing.T) {
+func TestDroppingHarnessesDeletesOnlyTheAgentsItOwns(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup")
+	f.mustRun("install")
 	l := f.env.layout
 	copies := map[string]string{
 		filepath.Join(l.Claude, "agents", "senior.md"):   filepath.Join(l.Claude, "agents", "my-reviewer.md"),
-		filepath.Join(l.Codex, "agents", "senior.toml"):  filepath.Join(l.Codex, "agents", "my-reviewer.toml"),
 		filepath.Join(l.OpenCode, "agents", "senior.md"): filepath.Join(l.OpenCode, "agents", "my-reviewer.md"),
 	}
 	for from, to := range copies {
 		copyFile(t, from, to)
 	}
 
-	f.mustRun("remove")
+	f.mustRun("install", "--harness", "codex")
 
 	for from, to := range copies {
 		if _, err := os.Lstat(from); err == nil {
-			t.Errorf("%s survived remove", from)
+			t.Errorf("%s survived dropping its harness", from)
 		}
 		if _, err := os.Stat(to); err != nil {
-			t.Errorf("remove deleted the user's %s", to)
+			t.Errorf("dropping a harness deleted the user's %s", to)
 		}
 	}
 }
 
 func TestDroppingAHarnessRemovesItsOwnedAgents(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup", "--harness", "claude,codex")
+	f.mustRun("install", "--harness", "claude,codex")
 	mine := filepath.Join(f.env.layout.Codex, "agents", "my-reviewer.toml")
 	writeFile(t, mine, "name = \"my-reviewer\"\n")
 
-	f.mustRun("setup", "--harness", "claude")
+	f.mustRun("install", "--harness", "claude")
 
 	for _, tier := range allTiers {
 		if _, err := os.Lstat(filepath.Join(f.env.layout.Codex, "agents", tier+".toml")); err == nil {
@@ -458,6 +458,29 @@ func TestDroppingAHarnessRemovesItsOwnedAgents(t *testing.T) {
 	}
 	if _, err := os.Stat(mine); err != nil {
 		t.Error("dropping codex deleted the user's own agent")
+	}
+}
+
+func TestNothingTouchesAHarnessNeverChosen(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("install", "--harness", "claude")
+	mine := map[string]string{
+		filepath.Join(f.env.layout.Codex, "agents", "senior.toml"):  "codex mine\n",
+		filepath.Join(f.env.layout.Codex, "AGENTS.md"):              "codex global\n",
+		filepath.Join(f.env.layout.OpenCode, "agents", "senior.md"): "opencode mine\n",
+	}
+	for path, text := range mine {
+		writeFile(t, path, text)
+	}
+
+	for _, args := range [][]string{{"install", "--harness", "claude"}, {"install"}, {"status"}} {
+		f.mustRun(args...)
+		for path, text := range mine {
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != text {
+				t.Errorf("after %v, %s = %q, %v; want %q", args, path, got, err, text)
+			}
+		}
 	}
 }
 
@@ -482,9 +505,9 @@ func (f fixture) installedSet() []string {
 	return slices.DeleteFunc(slices.Clone(stack.Harnesses), func(h string) bool { return !f.installed(h) })
 }
 
-func TestSetupHarnessFlagLimitsTheInstall(t *testing.T) {
+func TestInstallHarnessFlagLimitsTheInstall(t *testing.T) {
 	f := newFixture(t)
-	out := f.mustRun("setup", "--harness", "claude", "--harness", "opencode")
+	out := f.mustRun("install", "--harness", "claude", "--harness", "opencode")
 
 	if got := f.installedSet(); !slices.Equal(got, []string{"claude", "opencode"}) {
 		t.Errorf("installed into %v", got)
@@ -492,47 +515,47 @@ func TestSetupHarnessFlagLimitsTheInstall(t *testing.T) {
 	if !strings.Contains(out, "sifatul-stack · installing into Claude Code, OpenCode") {
 		t.Errorf("output lacks the harness line:\n%s", out)
 	}
-	f.mustRun("update")
+	f.mustRun("install")
 	if got := f.installedSet(); !slices.Equal(got, []string{"claude", "opencode"}) {
-		t.Errorf("update widened the install to %v", got)
+		t.Errorf("a rerun widened the install to %v", got)
 	}
 	if out := f.mustRun("status"); !strings.Contains(out, "Harnesses      Claude Code, OpenCode") || strings.Contains(out, "Codex") || strings.Count(out, "✓ current") != 4 {
 		t.Errorf("status should cover only the chosen harnesses:\n%s", out)
 	}
 }
 
-func TestSetupDroppingAHarnessRemovesIt(t *testing.T) {
+func TestInstallDroppingAHarnessRemovesIt(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup", "--harness", "claude,codex")
-	f.mustRun("setup", "--harness", "claude")
+	f.mustRun("install", "--harness", "claude,codex")
+	f.mustRun("install", "--harness", "claude")
 
 	if got := f.installedSet(); !slices.Equal(got, []string{"claude"}) {
 		t.Errorf("installed into %v after dropping codex", got)
 	}
 }
 
-func TestSetupWithoutFlagOrTerminalKeepsTheLastChoice(t *testing.T) {
+func TestInstallWithoutFlagOrTerminalKeepsTheLastChoice(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup", "--harness", "codex")
-	f.mustRun("setup")
+	f.mustRun("install", "--harness", "codex")
+	f.mustRun("install")
 
 	if got := f.installedSet(); !slices.Equal(got, []string{"codex"}) {
 		t.Errorf("installed into %v", got)
 	}
 }
 
-func TestSetupRejectsAnUnknownHarness(t *testing.T) {
+func TestInstallRejectsAnUnknownHarness(t *testing.T) {
 	f := newFixture(t)
-	out, code := f.run("setup", "--harness", "cursor")
+	out, code := f.run("install", "--harness", "cursor")
 	if code != 2 || !strings.Contains(out, "unknown harness") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 	if _, err := os.Stat(f.env.statePath()); err == nil {
-		t.Error("a rejected setup saved state")
+		t.Error("a rejected install saved state")
 	}
 }
 
-func TestSetupAsksWhichHarnessesInATerminal(t *testing.T) {
+func TestInstallAsksWhichHarnessesInATerminal(t *testing.T) {
 	f := newFixture(t)
 	var offered []ui.Choice
 	f.env.found = func(h stack.Harness) bool { return h.Key == "codex" }
@@ -541,7 +564,7 @@ func TestSetupAsksWhichHarnessesInATerminal(t *testing.T) {
 		return []string{"claude"}, nil
 	}
 
-	f.mustRun("setup")
+	f.mustRun("install")
 
 	if len(offered) != 3 {
 		t.Fatalf("offered %+v", offered)
@@ -556,7 +579,7 @@ func TestSetupAsksWhichHarnessesInATerminal(t *testing.T) {
 		t.Errorf("installed into %v", got)
 	}
 
-	f.mustRun("setup")
+	f.mustRun("install")
 	if c := offered[0]; !c.On || !c.Was {
 		t.Errorf("rerun should start from the last choice, got %+v", c)
 	}
@@ -565,41 +588,45 @@ func TestSetupAsksWhichHarnessesInATerminal(t *testing.T) {
 	}
 }
 
-func TestSetupCanceledChangesNothing(t *testing.T) {
+func TestInstallCanceledChangesNothing(t *testing.T) {
 	f := newFixture(t)
 	f.env.choose = func(context.Context, []ui.Choice) ([]string, error) { return nil, ui.ErrCanceled }
 
-	out, code := f.run("setup")
+	out, code := f.run("install")
 
 	if code != 1 || !strings.Contains(out, "nothing changed") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 	if got := f.installedSet(); len(got) != 0 {
-		t.Errorf("a canceled setup installed into %v", got)
+		t.Errorf("a canceled install installed into %v", got)
 	}
 	if _, err := os.Stat(f.clone()); err == nil {
-		t.Error("a canceled setup cloned anyway")
+		t.Error("a canceled install cloned anyway")
 	}
 }
 
-func TestSetupFlagSkipsThePicker(t *testing.T) {
+func TestInstallFlagSkipsThePicker(t *testing.T) {
 	f := newFixture(t)
 	f.env.choose = func(context.Context, []ui.Choice) ([]string, error) {
 		t.Error("the picker ran despite --harness")
 		return nil, nil
 	}
-	f.mustRun("setup", "--harness", "codex")
+	f.mustRun("install", "--harness", "codex")
 }
 
-func TestRemoveAndSetupSurviveAMovedCheckout(t *testing.T) {
-	for name, next := range map[string][]string{"remove": {"remove"}, "setup": {"setup"}, "setup from": {"setup", "--from", ""}} {
+func TestInstallSurvivesAMovedCheckout(t *testing.T) {
+	for name, next := range map[string][]string{
+		"install":                      {"install"},
+		"install from":                 {"install", "--from", ""},
+		"install dropping Claude Code": {"install", "--from", "", "--harness", "codex"},
+	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
 			old := filepath.Join(resolved(t, t.TempDir()), "checkout")
 			if err := os.Rename(f.upstream, old); err != nil {
 				t.Fatal(err)
 			}
-			f.mustRun("setup", "--from", old)
+			f.mustRun("install", "--from", old)
 			moved := old + "-moved"
 			if err := os.Rename(old, moved); err != nil {
 				t.Fatal(err)
@@ -608,8 +635,8 @@ func TestRemoveAndSetupSurviveAMovedCheckout(t *testing.T) {
 				t.Fatal(err)
 			}
 			args := slices.Clone(next)
-			if len(args) == 3 {
-				args[2] = moved
+			if i := slices.Index(args, ""); i >= 0 {
+				args[i] = moved
 			}
 			if out, code := f.run(args...); code != 0 {
 				t.Fatalf("%v exited %d:\n%s", args, code, out)
@@ -628,11 +655,11 @@ func TestRemoveAndSetupSurviveAMovedCheckout(t *testing.T) {
 
 func TestSwitchingSourcesKeepsOpenCodeChoices(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup", "--from", f.upstream)
+	f.mustRun("install", "--from", f.upstream)
 	senior := filepath.Join(f.env.layout.OpenCode, "agents", "senior.md")
 	writeFile(t, senior, strings.Replace(readFile(t, senior), "disabled: true\n", "", 1))
 
-	f.mustRun("setup")
+	f.mustRun("install")
 
 	if strings.Contains(readFile(t, senior), "disabled: true\n") {
 		t.Error("switching sources switched senior back off in OpenCode")
@@ -644,7 +671,7 @@ func TestSwitchingSourcesKeepsOpenCodeChoices(t *testing.T) {
 
 func TestStaleAgentsShowAsStaleThenReRenderedThroughTheRealSyncer(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup")
+	f.mustRun("install")
 	for _, p := range []string{
 		filepath.Join(f.env.layout.Claude, "agents", "senior.md"),
 		filepath.Join(f.env.layout.OpenCode, "agents", "senior.md"),
@@ -653,7 +680,7 @@ func TestStaleAgentsShowAsStaleThenReRenderedThroughTheRealSyncer(t *testing.T) 
 	}
 
 	status := f.mustRun("status")
-	for _, want := range []string{"~ stale", "run `sifatul-stack update`"} {
+	for _, want := range []string{"~ stale", "run `sifatul-stack install`"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("status lacks %q:\n%s", want, status)
 		}
@@ -662,25 +689,17 @@ func TestStaleAgentsShowAsStaleThenReRenderedThroughTheRealSyncer(t *testing.T) 
 		t.Errorf("status shows a stale or off agent as healthy:\n%s", status)
 	}
 
-	update := f.mustRun("update")
+	install := f.mustRun("install")
 	for _, want := range []string{"~ re-rendered  senior (Claude Code, OpenCode)", "4 off in OpenCode"} {
-		if !strings.Contains(update, want) {
-			t.Errorf("update lacks %q:\n%s", want, update)
+		if !strings.Contains(install, want) {
+			t.Errorf("install lacks %q:\n%s", want, install)
 		}
 	}
 }
 
-func TestStackErrorsCarryNoInternalPrefix(t *testing.T) {
+func TestInterruptedPullStopsBeforeSyncingAndExits130(t *testing.T) {
 	f := newFixture(t)
-	out, code := f.run("update")
-	if code != 1 || strings.Contains(out, "stack: ") || !strings.Contains(out, "✗ error: sifatul-stack is not set up") {
-		t.Fatalf("exit = %d, out = %q", code, out)
-	}
-}
-
-func TestInterruptedUpdateStopsBeforeSyncingAndExits130(t *testing.T) {
-	f := newFixture(t)
-	f.mustRun("setup")
+	f.mustRun("install")
 	ctx, interrupt := context.WithCancelCause(context.Background())
 	f.env.git = func(gctx context.Context, args ...string) ([]byte, error) {
 		if slices.Contains(args, "pull") {
@@ -690,13 +709,13 @@ func TestInterruptedUpdateStopsBeforeSyncingAndExits130(t *testing.T) {
 		}
 		return source.ExecGit(gctx, args...)
 	}
-	out, code := f.runContext(ctx, "update")
+	out, code := f.runContext(ctx, "install")
 	if code != 130 || strings.Contains(out, "✗") || strings.Contains(out, "skills") {
 		t.Fatalf("code = %d, out:\n%s", code, out)
 	}
 }
 
-func TestInterruptedSetupSavesNoStateAndExits130(t *testing.T) {
+func TestInterruptedCloneSavesNoStateAndExits130(t *testing.T) {
 	f := newFixture(t)
 	ctx, interrupt := context.WithCancelCause(context.Background())
 	f.env.git = func(gctx context.Context, args ...string) ([]byte, error) {
@@ -707,7 +726,7 @@ func TestInterruptedSetupSavesNoStateAndExits130(t *testing.T) {
 		}
 		return source.ExecGit(gctx, args...)
 	}
-	out, code := f.runContext(ctx, "setup")
+	out, code := f.runContext(ctx, "install")
 	if code != 130 || strings.Contains(out, "✗") {
 		t.Fatalf("code = %d, out:\n%s", code, out)
 	}
@@ -715,19 +734,19 @@ func TestInterruptedSetupSavesNoStateAndExits130(t *testing.T) {
 		t.Fatalf("state.json written after interrupt: %v", err)
 	}
 	if f.installed("claude") {
-		t.Fatal("setup linked claude after interrupt")
+		t.Fatal("install linked claude after interrupt")
 	}
 }
 
-func TestSetupSwitchesSourcesPastAnUnknownSavedHarness(t *testing.T) {
+func TestInstallSwitchesSourcesPastAnUnknownSavedHarness(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup", "--from", f.upstream, "--harness", "claude,opencode")
+	f.mustRun("install", "--from", f.upstream, "--harness", "claude,opencode")
 	writeFile(t, f.env.statePath(), strings.Replace(readFile(t, f.env.statePath()), `"opencode"`, `"gemini"`, 1))
 
-	out, code := f.run("setup", "--harness", "claude")
+	out, code := f.run("install", "--harness", "claude")
 
 	if code != 0 {
-		t.Fatalf("setup switch exited %d:\n%s", code, out)
+		t.Fatalf("install switch exited %d:\n%s", code, out)
 	}
 	if got := linkTarget(t, filepath.Join(f.env.layout.Claude, "skills", "full-review")); got != filepath.Join(f.clone(), "skills", "full-review") {
 		t.Errorf("skill links to %s", got)
@@ -736,20 +755,20 @@ func TestSetupSwitchesSourcesPastAnUnknownSavedHarness(t *testing.T) {
 
 func TestAnUnknownSavedHarnessErrorNamesTheStateFile(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup", "--from", f.upstream, "--harness", "claude,opencode")
+	f.mustRun("install", "--from", f.upstream, "--harness", "claude,opencode")
 	writeFile(t, f.env.statePath(), strings.Replace(readFile(t, f.env.statePath()), `"opencode"`, `"gemini"`, 1))
 
-	for _, command := range []string{"status", "update"} {
-		out, code := f.run(command)
-		if code != 1 || !strings.Contains(out, f.env.statePath()+`: unknown harness "gemini"`) {
-			t.Errorf("%s exited %d:\n%s", command, code, out)
+	for _, args := range [][]string{{"status"}, {"install", "--from", f.upstream}} {
+		out, code := f.run(args...)
+		if code != 1 || strings.Contains(out, "stack: ") || !strings.Contains(out, f.env.statePath()+`: unknown harness "gemini"`) {
+			t.Errorf("%v exited %d:\n%s", args, code, out)
 		}
 	}
 }
 
-func TestSetupWritesThroughASymlinkedState(t *testing.T) {
+func TestInstallWritesThroughASymlinkedState(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun("setup", "--from", f.upstream)
+	f.mustRun("install", "--from", f.upstream)
 	dot := filepath.Join(f.env.home, "dot", "state.json")
 	if err := os.MkdirAll(filepath.Dir(dot), 0o755); err != nil {
 		t.Fatal(err)
@@ -761,7 +780,7 @@ func TestSetupWritesThroughASymlinkedState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f.mustRun("setup")
+	f.mustRun("install")
 
 	if got := linkTarget(t, f.env.statePath()); got != dot {
 		t.Errorf("state.json now links to %q, want %q", got, dot)

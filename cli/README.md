@@ -1,6 +1,6 @@
 # sifatul-stack CLI
 
-The Go CLI behind sifatul-stack. The stack commands (`setup`, `update`, `status`, `remove`) are described in the [root README](../README.md); this file covers `sifatul-stack usage`, which shows the remaining subscription quota for Claude Code and Codex, for both humans and agents.
+The Go CLI behind sifatul-stack. The stack commands (`install`, `status`) are described in the [root README](../README.md); this file covers `sifatul-stack usage`, which shows the remaining subscription quota for Claude Code and Codex, for both humans and agents.
 
 ```sh
 make install                # build and install sifatul-stack to ~/.local/bin (or: make install BINDIR=/usr/local/bin)

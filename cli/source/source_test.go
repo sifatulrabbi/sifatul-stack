@@ -131,7 +131,7 @@ func TestPullRefusesADirtyClone(t *testing.T) {
 
 func TestStateRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sifatul-stack", "state.json")
-	if _, err := source.LoadState(path); !errors.Is(err, source.ErrNotSetUp) {
+	if _, err := source.LoadState(path); !errors.Is(err, source.ErrNotInstalled) {
 		t.Fatalf("missing state: err = %v", err)
 	}
 	want := source.State{Source: "/x/stack", Managed: true, Harnesses: []string{"claude", "codex"}, Agents: []string{"senior", "junior"}}

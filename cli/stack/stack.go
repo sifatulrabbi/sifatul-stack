@@ -96,6 +96,7 @@ type Syncer struct {
 	Source   string
 	Layout   Layout
 	Selected []string
+	Dropped  []string
 	Owned    []string
 }
 
@@ -109,11 +110,15 @@ func (s Syncer) selected(harness string) bool {
 	return slices.Contains(Chosen(s.Selected), harness)
 }
 
+func (s Syncer) dropped(harness string) bool {
+	return slices.Contains(s.Dropped, harness)
+}
+
 func (r *run) on(harnesses ...string) *run {
 	switch {
-	case r.mode.releases() || slices.ContainsFunc(harnesses, r.selected):
+	case slices.ContainsFunc(harnesses, r.selected):
 		return r
-	case r.mode == Link:
+	case r.mode == Link && slices.ContainsFunc(harnesses, r.dropped):
 		return &run{Syncer: r.Syncer, mode: Unlink, report: r.report}
 	default:
 		return nil
