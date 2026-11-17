@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"regexp"
-	"sort"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -34,8 +36,13 @@ type rolloutLimits struct {
 
 var rolloutPath = regexp.MustCompile(`^[0-9]{4}/[0-9]{2}/[0-9]{2}/rollout-.*\.jsonl$`)
 
+type rolloutFile struct {
+	name    string
+	modTime time.Time
+}
+
 func (s RolloutSource) Read(ctx context.Context) (Reading, error) {
-	var paths []string
+	var files []rolloutFile
 	err := fs.WalkDir(s.FS, ".", func(name string, entry fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -43,20 +50,33 @@ func (s RolloutSource) Read(ctx context.Context) (Reading, error) {
 		if err != nil {
 			return err
 		}
-		if !entry.IsDir() && rolloutPath.MatchString(name) {
-			paths = append(paths, name)
+		if entry.IsDir() || !rolloutPath.MatchString(name) {
+			return nil
 		}
+		info, err := entry.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		files = append(files, rolloutFile{name, info.ModTime()})
 		return nil
 	})
 	if err != nil {
 		return Reading{}, err
 	}
-	sort.Sort(sort.Reverse(sort.StringSlice(paths)))
-	for _, name := range paths {
+	slices.SortFunc(files, func(a, b rolloutFile) int {
+		if c := b.modTime.Compare(a.modTime); c != 0 {
+			return c
+		}
+		return strings.Compare(b.name, a.name)
+	})
+	for _, f := range files {
 		if err := ctx.Err(); err != nil {
 			return Reading{}, err
 		}
-		reading, err := s.readFile(name)
+		reading, err := s.readFile(f.name)
 		if err != nil {
 			return Reading{}, err
 		}
