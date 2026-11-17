@@ -132,6 +132,11 @@ func LoadState(path string) (State, error) {
 }
 
 func SaveState(path string, s State) error {
+	if target, err := filepath.EvalSymlinks(path); err == nil {
+		path = target
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

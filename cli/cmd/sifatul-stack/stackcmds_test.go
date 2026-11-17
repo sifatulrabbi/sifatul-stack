@@ -559,3 +559,27 @@ func TestAnUnknownSavedHarnessErrorNamesTheStateFile(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupWritesThroughASymlinkedState(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup", "--from", f.upstream)
+	dot := filepath.Join(f.env.home, "dot", "state.json")
+	if err := os.MkdirAll(filepath.Dir(dot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(f.env.statePath(), dot); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(dot, f.env.statePath()); err != nil {
+		t.Fatal(err)
+	}
+
+	f.mustRun("setup")
+
+	if got := linkTarget(t, f.env.statePath()); got != dot {
+		t.Errorf("state.json now links to %q, want %q", got, dot)
+	}
+	if st, err := source.LoadState(dot); err != nil || st.Source != f.clone() {
+		t.Errorf("symlink target holds %+v %v, want source %s", st, err, f.clone())
+	}
+}
