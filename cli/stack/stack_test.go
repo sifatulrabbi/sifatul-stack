@@ -751,7 +751,7 @@ func TestRunRefusesAnUnknownHarness(t *testing.T) {
 	run(t, s, stack.Link)
 	s.Selected = []string{"claude", "gemini"}
 
-	for _, mode := range []stack.Mode{stack.Link, stack.Status, stack.Detach} {
+	for _, mode := range []stack.Mode{stack.Link, stack.Status} {
 		if _, err := s.Run(mode); err == nil || !strings.Contains(err.Error(), "gemini") {
 			t.Errorf("%s err = %v, want one naming gemini", mode, err)
 		}
@@ -790,5 +790,20 @@ func TestUnlinkLeavesForeignTierAgentAlone(t *testing.T) {
 
 	if read(t, foreign) != "my own associate agent\n" {
 		t.Error("unlink removed or changed a foreign agent at a tier path")
+	}
+}
+
+func TestUnlinkIgnoresAnUnknownSavedHarness(t *testing.T) {
+	for _, mode := range []stack.Mode{stack.Unlink, stack.Detach} {
+		t.Run(string(mode), func(t *testing.T) {
+			s := newSyncer(t, fixtureSource(t, "keep"))
+			run(t, s, stack.Link)
+			s.Selected = []string{"claude", "gemini"}
+
+			if _, err := s.Run(mode); err != nil {
+				t.Fatalf("%s: %v", mode, err)
+			}
+			assertMissing(t, filepath.Join(s.Layout.Claude, "skills", "keep"))
+		})
 	}
 }

@@ -81,6 +81,9 @@ func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode s
 	if werr := e.print(w, view(r.Rows)); werr != nil {
 		return fmt.Errorf("%w: %w", errOutput, werr)
 	}
+	if errors.Is(err, stack.ErrUnknownHarness) {
+		err = fmt.Errorf("%s: %w", e.statePath(), err)
+	}
 	if err != nil {
 		return failed(err)
 	}

@@ -127,7 +127,7 @@ func (r *run) on(harnesses ...string) *run {
 }
 
 func (s Syncer) Run(mode Mode) (Report, error) {
-	if mode != Unlink {
+	if !mode.releases() {
 		for _, h := range s.Selected {
 			if _, err := Find(h); err != nil {
 				return Report{}, err

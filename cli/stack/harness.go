@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -38,6 +39,8 @@ var table = []Harness{
 
 var Harnesses = keys(table)
 
+var ErrUnknownHarness = errors.New("unknown harness")
+
 func keys(hs []Harness) []string {
 	out := make([]string, len(hs))
 	for i, h := range hs {
@@ -51,7 +54,7 @@ func All() []Harness { return slices.Clone(table) }
 func Find(key string) (Harness, error) {
 	i := slices.IndexFunc(table, func(h Harness) bool { return h.Key == key })
 	if i < 0 {
-		return Harness{}, fmt.Errorf("unknown harness %q; choose from %s", key, strings.Join(keys(table), ", "))
+		return Harness{}, fmt.Errorf("%w %q; choose from %s", ErrUnknownHarness, key, strings.Join(keys(table), ", "))
 	}
 	return table[i], nil
 }

@@ -531,3 +531,31 @@ func TestInterruptedSetupSavesNoStateAndExits130(t *testing.T) {
 		t.Fatal("setup linked claude after interrupt")
 	}
 }
+
+func TestSetupSwitchesSourcesPastAnUnknownSavedHarness(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup", "--from", f.upstream, "--harness", "claude,opencode")
+	writeFile(t, f.env.statePath(), strings.Replace(readFile(t, f.env.statePath()), `"opencode"`, `"gemini"`, 1))
+
+	out, code := f.run("setup", "--harness", "claude")
+
+	if code != 0 {
+		t.Fatalf("setup switch exited %d:\n%s", code, out)
+	}
+	if got := linkTarget(t, filepath.Join(f.env.layout.Claude, "skills", "full-review")); got != filepath.Join(f.clone(), "skills", "full-review") {
+		t.Errorf("skill links to %s", got)
+	}
+}
+
+func TestAnUnknownSavedHarnessErrorNamesTheStateFile(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup", "--from", f.upstream, "--harness", "claude,opencode")
+	writeFile(t, f.env.statePath(), strings.Replace(readFile(t, f.env.statePath()), `"opencode"`, `"gemini"`, 1))
+
+	for _, command := range []string{"status", "update"} {
+		out, code := f.run(command)
+		if code != 1 || !strings.Contains(out, f.env.statePath()+`: unknown harness "gemini"`) {
+			t.Errorf("%s exited %d:\n%s", command, code, out)
+		}
+	}
+}
