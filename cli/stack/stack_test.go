@@ -639,3 +639,25 @@ func TestOpenCodeChoiceSurvivesDetachThenLink(t *testing.T) {
 	}
 	assertLinksTo(t, filepath.Join(s.Layout.Claude, "skills", "keep"), filepath.Join(s.Source, "skills", "keep"))
 }
+
+func TestUnlinkRestoresTheNewestBackupItMade(t *testing.T) {
+	s := newSyncer(t, fixtureSource(t))
+	claudeMD := filepath.Join(s.Layout.Claude, "CLAUDE.md")
+	write(t, claudeMD+".backup-20260101000000", "older\n")
+	write(t, claudeMD, "newest\n")
+	run(t, s, stack.Link)
+	write(t, claudeMD+".backup-old", "not ours\n")
+	write(t, claudeMD+".backup-99999999999999", "not a time\n")
+
+	run(t, s, stack.Unlink)
+
+	if got := read(t, claudeMD); got != "newest\n" {
+		t.Errorf("CLAUDE.md = %q, want the newest backup setup made", got)
+	}
+	if got := read(t, claudeMD+".backup-old"); got != "not ours\n" {
+		t.Errorf("foreign backup changed: %q", got)
+	}
+	if got := read(t, claudeMD+".backup-20260101000000"); got != "older\n" {
+		t.Errorf("older backup changed: %q", got)
+	}
+}

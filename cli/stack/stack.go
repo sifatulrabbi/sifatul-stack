@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 )
@@ -287,13 +286,11 @@ func (r *run) linkInstructions(harness, dst string) {
 			r.fail(kind, name, harness, err)
 			return
 		}
-		backups, _ := filepath.Glob(dst + ".backup-*")
-		if len(backups) == 0 {
+		newest := newestBackup(dst)
+		if newest == "" {
 			r.did(kind, name, harness, "removed", "removed")
 			return
 		}
-		sort.Strings(backups)
-		newest := backups[len(backups)-1]
 		if err := os.Rename(newest, dst); err != nil {
 			r.fail(kind, name, harness, err)
 			return
@@ -314,6 +311,21 @@ func (r *run) linkInstructions(harness, dst string) {
 		r.did(kind, name, harness, "backed up to "+filepath.Base(backup), "backed up")
 	}
 	r.linkPath(kind, name, harness, src, dst)
+}
+
+const backupStamp = "20060102150405"
+
+func newestBackup(dst string) string {
+	entries, _ := os.ReadDir(filepath.Dir(dst))
+	newest, at := "", time.Time{}
+	for _, e := range entries {
+		stamp, ok := strings.CutPrefix(e.Name(), filepath.Base(dst)+".backup-")
+		t, err := time.Parse(backupStamp, stamp)
+		if ok && err == nil && (newest == "" || t.After(at)) {
+			newest, at = filepath.Join(filepath.Dir(dst), e.Name()), t
+		}
+	}
+	return newest
 }
 
 func (r *run) instructionsPath(harness string) string {
