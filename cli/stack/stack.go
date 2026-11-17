@@ -2,15 +2,12 @@ package stack
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 )
-
-const Mark = "# managed by sifatul-stack"
 
 type Mode string
 
@@ -85,7 +82,8 @@ type Row struct {
 }
 
 type Report struct {
-	Rows []Row
+	Rows   []Row
+	Agents []string
 }
 
 func (r Report) Conflicts() int {
@@ -103,6 +101,7 @@ type Syncer struct {
 	Layout   Layout
 	Now      func() time.Time
 	Selected []string
+	Owned    []string
 }
 
 type run struct {
@@ -144,8 +143,15 @@ func (s Syncer) Run(mode Mode) (Report, error) {
 		if skills, err = s.skills(); err != nil {
 			return Report{}, err
 		}
+	} else if mode == Unlink {
+		defs, _ = loadAgents(s.Source)
 	}
 	r := &run{Syncer: s, mode: mode, report: &Report{}}
+	if !mode.releases() {
+		for _, d := range defs {
+			r.report.Agents = append(r.report.Agents, d.Tier)
+		}
+	}
 	for _, g := range skillsGroups() {
 		x := r.on(g.users...)
 		if x == nil {
@@ -298,7 +304,7 @@ func (r *run) retire(kind, name, harness, path string, statusState State) {
 	case Status:
 		r.row(kind, name, harness, statusState)
 	default:
-		if err := os.Remove(path); err != nil {
+		if err := os.RemoveAll(path); err != nil {
 			r.fail(kind, name, harness, err)
 			return
 		}
@@ -366,22 +372,13 @@ func newestBackup(dst string) string {
 	return newest
 }
 
-func managed(content string) bool {
-	return slices.Contains(strings.Split(content, "\n"), Mark)
-}
-
-func readAgent(path string) (raw string, present bool, err error) {
+func readAgent(path string) (raw string, regular bool) {
 	fi, err := os.Lstat(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return "", false, nil
-	case err != nil:
-		return "", true, err
-	case !fi.Mode().IsRegular():
-		return "", true, fmt.Errorf("%s is not a regular file", path)
+	if err != nil || !fi.Mode().IsRegular() {
+		return "", false
 	}
 	b, err := os.ReadFile(path)
-	return string(b), true, err
+	return string(b), err == nil
 }
 
 func writeFile(path string, data []byte) error {
@@ -406,16 +403,9 @@ func writeFile(path string, data []byte) error {
 
 func (r *run) syncAgent(d agentDef, h Harness) {
 	dst := h.agentPath(r.Layout, d.Tier)
-	text, present, err := readAgent(dst)
-	if err != nil {
-		r.conflict("agent", d.Tier, h.Key, err.Error())
-		return
-	}
-	if present && !managed(text) {
-		r.conflict("agent", d.Tier, h.Key, dst+" is not managed by sifatul-stack")
-		return
-	}
-	enabled := h.enabledIn == nil || (present && h.enabledIn(text))
+	text, readable := readAgent(dst)
+	present := exists(dst)
+	enabled := h.enabledIn == nil || (readable && h.enabledIn(text))
 	wanted := h.render(d, d.Models[h.Key], enabled)
 	row := Row{Kind: "agent", Name: d.Tier, Harness: h.Key, State: Stale}
 	if h.enabledIn != nil {
@@ -424,15 +414,11 @@ func (r *run) syncAgent(d agentDef, h Harness) {
 	switch {
 	case !present:
 		row.State = Missing
-	case text == wanted:
+	case readable && text == wanted:
 		row.State = Current
 	}
 	if r.mode == Link && row.State != Current {
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			r.fail("agent", d.Tier, h.Key, err)
-			return
-		}
-		if err := writeFile(dst, []byte(wanted)); err != nil {
+		if err := writeAgent(dst, wanted); err != nil {
 			r.fail("agent", d.Tier, h.Key, err)
 			return
 		}
@@ -442,22 +428,38 @@ func (r *run) syncAgent(d agentDef, h Harness) {
 	r.report.Rows = append(r.report.Rows, row)
 }
 
-func (r *run) pruneAgents(h Harness, defs []agentDef) {
-	dir := h.agentDir(r.Layout)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
+func writeAgent(dst, wanted string) error {
+	if fi, err := os.Lstat(dst); err == nil && !fi.Mode().IsRegular() {
+		if err := os.RemoveAll(dst); err != nil {
+			return err
+		}
 	}
-	for _, e := range entries {
-		tier, ok := strings.CutSuffix(e.Name(), h.agentExt)
-		if !ok || !e.Type().IsRegular() || !r.mode.releases() && slices.ContainsFunc(defs, func(d agentDef) bool { return d.Tier == tier }) {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return writeFile(dst, []byte(wanted))
+}
+
+func (r *run) pruneAgents(h Harness, defs []agentDef) {
+	current := make([]string, len(defs))
+	for i, d := range defs {
+		current[i] = d.Tier
+	}
+	var candidates []string
+	for _, tier := range append(slices.Clone(r.Owned), current...) {
+		if slices.Contains(candidates, tier) || !r.mode.releases() && slices.Contains(current, tier) {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
-		raw, err := os.ReadFile(path)
-		if err != nil || !managed(string(raw)) || !h.namesTier(string(raw), tier) {
+		candidates = append(candidates, tier)
+	}
+	for _, tier := range candidates {
+		path := h.agentPath(r.Layout, tier)
+		if !exists(path) {
 			continue
 		}
 		r.retire("agent", tier, h.Key, path, Orphaned)
+		if r.mode != Status && exists(path) && !slices.Contains(r.report.Agents, tier) {
+			r.report.Agents = append(r.report.Agents, tier)
+		}
 	}
 }

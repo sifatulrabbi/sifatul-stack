@@ -111,6 +111,7 @@ type State struct {
 	Source    string   `json:"source"`
 	Managed   bool     `json:"managed"`
 	Harnesses []string `json:"harnesses,omitempty"`
+	Agents    []string `json:"agents,omitempty"`
 }
 
 func LoadState(path string) (State, error) {

@@ -251,11 +251,14 @@ func TestConflictsAreLeftAlone(t *testing.T) {
 
 	r := run(t, s, stack.Link)
 
-	if r.Conflicts() != 2 {
-		t.Errorf("conflicts = %d, want 2: %+v", r.Conflicts(), r.Rows)
+	if r.Conflicts() != 1 {
+		t.Errorf("conflicts = %d, want 1: %+v", r.Conflicts(), r.Rows)
 	}
-	if read(t, foreignSkill) != "mine\n" || read(t, foreignAgent) != "my own associate agent\n" {
+	if read(t, foreignSkill) != "mine\n" {
 		t.Error("a foreign file was changed")
+	}
+	if fm := frontmatter(t, foreignAgent); fm["name"] != "associate" {
+		t.Errorf("the agent path was not rendered: %v", fm)
 	}
 	if fm := frontmatter(t, filepath.Join(l.Claude, "agents", "senior.md")); fm["name"] != "senior" {
 		t.Error("non-conflicting agents were not installed")
@@ -309,7 +312,9 @@ func TestLinkPrunesWhatTheSourceDropped(t *testing.T) {
 	src := fixtureSource(t, "keep", "gone")
 	s := newSyncer(t, src)
 	l := s.Layout
-	run(t, s, stack.Link)
+	s.Owned = run(t, s, stack.Link).Agents
+	mine := filepath.Join(l.Claude, "agents", "mine.md")
+	write(t, mine, "keep me\n")
 
 	if err := os.RemoveAll(filepath.Join(src, "skills", "gone")); err != nil {
 		t.Fatal(err)
@@ -344,6 +349,107 @@ func TestLinkPrunesWhatTheSourceDropped(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(l.Claude, "agents", "senior.md")); err != nil {
 		t.Error("a current agent was pruned")
+	}
+	if read(t, mine) != "keep me\n" {
+		t.Error("a user agent with an unrelated name was changed")
+	}
+}
+
+func TestADroppedTierNobodyRecordedIsLeftAlone(t *testing.T) {
+	src := fixtureSource(t)
+	s := newSyncer(t, src)
+	run(t, s, stack.Link)
+	tsv := filepath.Join(src, "agents", "models.tsv")
+	var kept []string
+	for _, line := range strings.Split(read(t, tsv), "\n") {
+		if !strings.HasPrefix(line, "associate\t") {
+			kept = append(kept, line)
+		}
+	}
+	write(t, tsv, strings.Join(kept, "\n"))
+
+	run(t, s, stack.Link)
+
+	if _, err := os.Stat(filepath.Join(s.Layout.Claude, "agents", "associate.md")); err != nil {
+		t.Error("an agent the syncer was not told it owns was pruned")
+	}
+}
+
+func TestReportListsTheAgentsItRendered(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	if got := run(t, s, stack.Link).Agents; !slices.Equal(got, tiers) {
+		t.Errorf("link agents = %v, want %v", got, tiers)
+	}
+	if got := run(t, s, stack.Status).Agents; !slices.Equal(got, tiers) {
+		t.Errorf("status agents = %v, want %v", got, tiers)
+	}
+}
+
+func TestRenderedAgentsCarryNoMarkerLine(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	run(t, s, stack.Link)
+	for _, dir := range []string{s.Layout.Claude, s.Layout.Codex, s.Layout.OpenCode} {
+		files, _ := filepath.Glob(filepath.Join(dir, "agents", "*"))
+		if len(files) != len(tiers) {
+			t.Fatalf("%s holds %v", dir, files)
+		}
+		for _, f := range files {
+			if strings.Contains(read(t, f), "managed by") {
+				t.Errorf("%s carries a marker line", f)
+			}
+		}
+	}
+}
+
+func TestLinkReplacesWhateverSitsAtAnAgentPath(t *testing.T) {
+	for name, plant := range map[string]func(t *testing.T, path string){
+		"file": func(t *testing.T, path string) { write(t, path, "my own senior\n") },
+		"dir":  func(t *testing.T, path string) { write(t, filepath.Join(path, "inside"), "x\n") },
+		"symlink": func(t *testing.T, path string) {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere.md"), path); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSyncer(t, repoRoot(t))
+			senior := filepath.Join(s.Layout.Claude, "agents", "senior.md")
+			plant(t, senior)
+			target, _ := os.Readlink(senior)
+
+			if st := states(run(t, s, stack.Status)); st["agent senior claude"] != "stale" {
+				t.Errorf("status = %q, want stale", st["agent senior claude"])
+			}
+			r := run(t, s, stack.Link)
+
+			fi, err := os.Lstat(senior)
+			if err != nil || !fi.Mode().IsRegular() {
+				t.Fatalf("senior.md is not a regular file: %v %v", fi, err)
+			}
+			if fm := frontmatter(t, senior); fm["name"] != "senior" {
+				t.Errorf("senior.md = %v", fm)
+			}
+			if target != "" {
+				assertMissing(t, target)
+			}
+			if got := changes(r)["agent senior claude"]; got != "re-rendered" {
+				t.Errorf("change = %q, want re-rendered", got)
+			}
+		})
+	}
+}
+
+func TestUnlinkRemovesCurrentTiersWithoutARecordedList(t *testing.T) {
+	s := newSyncer(t, fixtureSource(t))
+	run(t, s, stack.Link)
+
+	run(t, s, stack.Unlink)
+
+	for _, tier := range tiers {
+		assertMissing(t, filepath.Join(s.Layout.Codex, "agents", tier+".toml"))
 	}
 }
 
@@ -632,33 +738,7 @@ func TestParseHarnesses(t *testing.T) {
 	}
 }
 
-func TestLinkDoesNotWriteThroughForeignAgentSymlink(t *testing.T) {
-	s := newSyncer(t, repoRoot(t))
-	target := filepath.Join(t.TempDir(), "elsewhere.md")
-	link := filepath.Join(s.Layout.Claude, "agents", "senior.md")
-	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
-
-	r := run(t, s, stack.Link)
-
-	if _, err := os.Stat(target); err == nil {
-		t.Errorf("rendered agent was written through a foreign symlink to %s", target)
-	}
-	if got, _ := os.Readlink(link); got != target {
-		t.Errorf("foreign symlink was replaced: %q", got)
-	}
-	if !slices.ContainsFunc(r.Rows, func(row stack.Row) bool {
-		return row.State == stack.Conflict && row.Kind == "agent" && row.Name == "senior" && row.Harness == "claude"
-	}) {
-		t.Errorf("foreign symlink not reported as a conflict: %+v", r.Rows)
-	}
-}
-
-func TestLinkDoesNotOverwriteUnreadableForeignAgent(t *testing.T) {
+func TestLinkReplacesAnUnreadableAgent(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads everything")
 	}
@@ -671,14 +751,14 @@ func TestLinkDoesNotOverwriteUnreadableForeignAgent(t *testing.T) {
 
 	r := run(t, s, stack.Link)
 
-	if err := os.Chmod(foreign, 0o644); err != nil {
+	if err := os.Chmod(foreign, 0o644); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	if got := read(t, foreign); got != "my own senior\n" {
-		t.Errorf("unreadable foreign agent was overwritten:\n%.80s", got)
+	if fm := frontmatter(t, foreign); fm["name"] != "senior" {
+		t.Errorf("senior.md = %v", fm)
 	}
-	if r.Conflicts() != 1 {
-		t.Errorf("conflicts = %d, want 1: %+v", r.Conflicts(), r.Rows)
+	if r.Conflicts() != 0 {
+		t.Errorf("conflicts = %d, want 0: %+v", r.Conflicts(), r.Rows)
 	}
 }
 
@@ -686,7 +766,7 @@ func TestUnlinkWorksAfterTheSourceIsGone(t *testing.T) {
 	src := fixtureSource(t, "keep")
 	s := newSyncer(t, src)
 	l := s.Layout
-	run(t, s, stack.Link)
+	s.Owned = run(t, s, stack.Link).Agents
 	if err := os.RemoveAll(src); err != nil {
 		t.Fatal(err)
 	}
@@ -802,19 +882,6 @@ func TestUnlinkLeavesForeignGlobalInstructionsAlone(t *testing.T) {
 	}
 }
 
-func TestUnlinkLeavesForeignTierAgentAlone(t *testing.T) {
-	s := newSyncer(t, repoRoot(t))
-	foreign := filepath.Join(s.Layout.Claude, "agents", "associate.md")
-	write(t, foreign, "my own associate agent\n")
-	run(t, s, stack.Link)
-
-	run(t, s, stack.Unlink)
-
-	if read(t, foreign) != "my own associate agent\n" {
-		t.Error("unlink removed or changed a foreign agent at a tier path")
-	}
-}
-
 func TestUnlinkIgnoresAnUnknownSavedHarness(t *testing.T) {
 	for _, mode := range []stack.Mode{stack.Unlink, stack.Detach} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -832,11 +899,12 @@ func TestUnlinkIgnoresAnUnknownSavedHarness(t *testing.T) {
 
 func TestUpdateKeepsUserCopyOfRenderedAgent(t *testing.T) {
 	s := newSyncer(t, repoRoot(t))
-	run(t, s, stack.Link)
+	s.Owned = run(t, s, stack.Link).Agents
 	copies := map[string]string{}
 	for from, to := range map[string]string{
-		filepath.Join(s.Layout.Claude, "agents", "senior.md"):  filepath.Join(s.Layout.Claude, "agents", "reviewer.md"),
-		filepath.Join(s.Layout.Codex, "agents", "senior.toml"): filepath.Join(s.Layout.Codex, "agents", "reviewer.toml"),
+		filepath.Join(s.Layout.Claude, "agents", "senior.md"):   filepath.Join(s.Layout.Claude, "agents", "my-reviewer.md"),
+		filepath.Join(s.Layout.Codex, "agents", "senior.toml"):  filepath.Join(s.Layout.Codex, "agents", "my-reviewer.toml"),
+		filepath.Join(s.Layout.OpenCode, "agents", "senior.md"): filepath.Join(s.Layout.OpenCode, "agents", "my-reviewer.md"),
 	} {
 		copies[to] = read(t, from) + "my own edits\n"
 		write(t, to, copies[to])
@@ -853,5 +921,34 @@ func TestUpdateKeepsUserCopyOfRenderedAgent(t *testing.T) {
 			}
 		}
 	}
-	assertMissing(t, filepath.Join(s.Layout.Claude, "agents", "senior.md"))
+	for _, p := range []string{
+		filepath.Join(s.Layout.Claude, "agents", "senior.md"),
+		filepath.Join(s.Layout.Codex, "agents", "senior.toml"),
+		filepath.Join(s.Layout.OpenCode, "agents", "senior.md"),
+	} {
+		assertMissing(t, p)
+	}
+}
+
+func TestLinkRewritesAgentsRenderedWithTheOldMarkerLine(t *testing.T) {
+	s := newSyncer(t, repoRoot(t))
+	run(t, s, stack.Link)
+	opencode := filepath.Join(s.Layout.OpenCode, "agents", "senior.md")
+	codex := filepath.Join(s.Layout.Codex, "agents", "senior.toml")
+	write(t, opencode, strings.Replace(strings.Replace(read(t, opencode), "---\n", "---\n# managed by sifatul-stack\n", 1), "disabled: true\n", "", 1))
+	write(t, codex, "# managed by sifatul-stack\n"+read(t, codex))
+
+	if st := states(run(t, s, stack.Status)); st["agent senior opencode"] != "stale" || st["agent senior codex"] != "stale" {
+		t.Errorf("status = %v", st)
+	}
+	run(t, s, stack.Link)
+
+	for _, f := range []string{opencode, codex} {
+		if strings.Contains(read(t, f), "managed by") {
+			t.Errorf("%s kept the marker line", f)
+		}
+	}
+	if hasLine(read(t, opencode), "disabled: true") {
+		t.Error("the user's OpenCode choice was lost in the rewrite")
+	}
 }

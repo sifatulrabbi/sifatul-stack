@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 )
 
@@ -110,48 +109,19 @@ func finish(b *strings.Builder) string { return strings.TrimRight(b.String(), "\
 
 func renderClaude(d agentDef, m model, _ bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "---\n%s\nname: %s\ndescription: \"%s\"\nmodel: %s\neffort: %s\n---\n%s", Mark, d.Tier, d.Description, m.Name, m.Effort, d.Prompt)
+	fmt.Fprintf(&b, "---\nname: %s\ndescription: \"%s\"\nmodel: %s\neffort: %s\n---\n%s", d.Tier, d.Description, m.Name, m.Effort, d.Prompt)
 	return finish(&b)
-}
-
-func claudeName(raw string) (string, bool) {
-	lines := strings.Split(raw, "\n")
-	if lines[0] != "---" {
-		return "", false
-	}
-	for _, l := range lines[1:] {
-		if l == "---" {
-			break
-		}
-		if name, ok := strings.CutPrefix(l, "name: "); ok {
-			return name, true
-		}
-	}
-	return "", false
 }
 
 func renderCodex(d agentDef, m model, _ bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\nname = \"%s\"\ndescription = \"%s\"\nmodel = \"%s\"\nmodel_reasoning_effort = \"%s\"\ndeveloper_instructions = '''\n%s'''\n", Mark, d.Tier, d.Description, m.Name, m.Effort, d.Prompt)
+	fmt.Fprintf(&b, "name = \"%s\"\ndescription = \"%s\"\nmodel = \"%s\"\nmodel_reasoning_effort = \"%s\"\ndeveloper_instructions = '''\n%s'''\n", d.Tier, d.Description, m.Name, m.Effort, d.Prompt)
 	return finish(&b)
-}
-
-func codexName(raw string) (string, bool) {
-	for _, l := range strings.Split(raw, "\n") {
-		if strings.HasPrefix(l, "developer_instructions") {
-			break
-		}
-		if quoted, ok := strings.CutPrefix(l, "name = "); ok {
-			name, err := strconv.Unquote(quoted)
-			return name, err == nil
-		}
-	}
-	return "", false
 }
 
 func renderOpenCode(d agentDef, m model, enabled bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "---\n%s\ndescription: \"%s\"\nmode: subagent\nmodel: %s\nreasoningEffort: %s\n", Mark, d.Description, m.Name, m.Effort)
+	fmt.Fprintf(&b, "---\ndescription: \"%s\"\nmode: subagent\nmodel: %s\nreasoningEffort: %s\n", d.Description, m.Name, m.Effort)
 	if !enabled {
 		b.WriteString("disabled: true\n")
 	}

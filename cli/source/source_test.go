@@ -134,7 +134,7 @@ func TestStateRoundTrip(t *testing.T) {
 	if _, err := source.LoadState(path); !errors.Is(err, source.ErrNotSetUp) {
 		t.Fatalf("missing state: err = %v", err)
 	}
-	want := source.State{Source: "/x/stack", Managed: true, Harnesses: []string{"claude", "codex"}}
+	want := source.State{Source: "/x/stack", Managed: true, Harnesses: []string{"claude", "codex"}, Agents: []string{"senior", "junior"}}
 	if err := source.SaveState(path, want); err != nil {
 		t.Fatal(err)
 	}
@@ -150,8 +150,8 @@ func TestStateFromBeforeHarnessChoiceLoadsWithNoSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := source.LoadState(path)
-	if err != nil || got.Harnesses != nil {
-		t.Fatalf("state = %+v %v; an old state should mean every harness", got, err)
+	if err != nil || got.Harnesses != nil || got.Agents != nil {
+		t.Fatalf("state = %+v %v; an old state should mean every harness and no recorded agents", got, err)
 	}
 }
 

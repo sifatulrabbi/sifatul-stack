@@ -19,7 +19,6 @@ type Harness struct {
 	skills       skillsGroup
 	render       func(d agentDef, m model, enabled bool) string
 	enabledIn    func(raw string) bool
-	renderedName func(raw string) (string, bool)
 }
 
 type skillsGroup struct {
@@ -34,8 +33,8 @@ var (
 )
 
 var table = []Harness{
-	{Key: "claude", Label: "Claude Code", Binary: "claude", dir: func(l Layout) string { return l.Claude }, instructions: "CLAUDE.md", agentExt: ".md", skills: claudeSkills, render: renderClaude, renderedName: claudeName},
-	{Key: "codex", Label: "Codex", Binary: "codex", dir: func(l Layout) string { return l.Codex }, instructions: "AGENTS.md", agentExt: ".toml", skills: sharedSkills, render: renderCodex, renderedName: codexName},
+	{Key: "claude", Label: "Claude Code", Binary: "claude", dir: func(l Layout) string { return l.Claude }, instructions: "CLAUDE.md", agentExt: ".md", skills: claudeSkills, render: renderClaude},
+	{Key: "codex", Label: "Codex", Binary: "codex", dir: func(l Layout) string { return l.Codex }, instructions: "AGENTS.md", agentExt: ".toml", skills: sharedSkills, render: renderCodex},
 	{Key: "opencode", Label: "OpenCode", Binary: "opencode", dir: func(l Layout) string { return l.OpenCode }, instructions: "AGENTS.md", agentExt: ".md", skills: sharedSkills, render: renderOpenCode, enabledIn: openCodeEnabled, SwitchOn: "delete `disabled: true` from one to switch it on"},
 }
 
@@ -71,14 +70,6 @@ func (h Harness) agentDir(l Layout) string { return filepath.Join(h.dir(l), "age
 
 func (h Harness) agentPath(l Layout, tier string) string {
 	return filepath.Join(h.agentDir(l), tier+h.agentExt)
-}
-
-func (h Harness) namesTier(raw, tier string) bool {
-	if h.renderedName == nil {
-		return true
-	}
-	name, ok := h.renderedName(raw)
-	return ok && name == tier
 }
 
 func HarnessLabel(key string) string {

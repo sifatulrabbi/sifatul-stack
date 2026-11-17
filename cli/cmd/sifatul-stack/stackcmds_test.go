@@ -266,11 +266,118 @@ func TestRemoveRestoresAndForgetsState(t *testing.T) {
 
 func TestSetupReportsConflictsWithExitOne(t *testing.T) {
 	f := newFixture(t)
-	writeFile(t, filepath.Join(f.env.layout.Claude, "agents", "senior.md"), "mine\n")
+	writeFile(t, filepath.Join(f.env.layout.Claude, "skills", "full-review", "SKILL.md"), "mine\n")
 
 	out, code := f.run("setup")
-	if code != 1 || !strings.Contains(out, "! 1 conflict, left alone") || !strings.Contains(out, "agent senior · Claude Code  ~/.claude/agents/senior.md is not managed by sifatul-stack") {
+	if code != 1 || !strings.Contains(out, "! 1 conflict, left alone") || !strings.Contains(out, "skill full-review · Claude Code  ~/.claude/skills/full-review exists") {
 		t.Errorf("exit %d:\n%s", code, out)
+	}
+}
+
+var allTiers = []string{"principal", "senior", "junior", "associate"}
+
+func (f fixture) state() source.State {
+	f.t.Helper()
+	st, err := source.LoadState(f.env.statePath())
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return st
+}
+
+func dropTier(t *testing.T, dir, tier string) {
+	t.Helper()
+	tsv := filepath.Join(dir, "agents", "models.tsv")
+	var kept []string
+	for _, line := range strings.Split(readFile(t, tsv), "\n") {
+		if !strings.HasPrefix(line, tier+"\t") {
+			kept = append(kept, line)
+		}
+	}
+	writeFile(t, tsv, strings.Join(kept, "\n"))
+}
+
+func TestStateRecordsTheRenderedAgents(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup")
+	if got := f.state().Agents; !slices.Equal(got, allTiers) {
+		t.Errorf("after setup agents = %v, want %v", got, allTiers)
+	}
+	f.commit(func(dir string) { dropTier(t, dir, "associate") })
+
+	f.mustRun("update")
+
+	if got := f.state().Agents; !slices.Equal(got, allTiers[:3]) {
+		t.Errorf("after update agents = %v, want %v", got, allTiers[:3])
+	}
+}
+
+func TestUpdatePrunesATierDroppedFromModelsTSV(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup")
+	mine := filepath.Join(f.env.layout.Codex, "agents", "my-helper.toml")
+	writeFile(t, mine, "name = \"my-helper\"\n")
+	f.commit(func(dir string) { dropTier(t, dir, "associate") })
+
+	out := f.mustRun("update")
+
+	for _, p := range []string{
+		filepath.Join(f.env.layout.Claude, "agents", "associate.md"),
+		filepath.Join(f.env.layout.Codex, "agents", "associate.toml"),
+		filepath.Join(f.env.layout.OpenCode, "agents", "associate.md"),
+	} {
+		if _, err := os.Lstat(p); err == nil {
+			t.Errorf("%s survived the update", p)
+		}
+	}
+	if !strings.Contains(out, "− pruned  associate") {
+		t.Errorf("update output lacks the prune:\n%s", out)
+	}
+	if readFile(t, mine) != "name = \"my-helper\"\n" {
+		t.Error("a user agent with an unrelated name was changed")
+	}
+}
+
+func TestRemoveDeletesOnlyTheAgentsItOwns(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup")
+	l := f.env.layout
+	copies := map[string]string{
+		filepath.Join(l.Claude, "agents", "senior.md"):   filepath.Join(l.Claude, "agents", "my-reviewer.md"),
+		filepath.Join(l.Codex, "agents", "senior.toml"):  filepath.Join(l.Codex, "agents", "my-reviewer.toml"),
+		filepath.Join(l.OpenCode, "agents", "senior.md"): filepath.Join(l.OpenCode, "agents", "my-reviewer.md"),
+	}
+	for from, to := range copies {
+		copyFile(t, from, to)
+	}
+
+	f.mustRun("remove")
+
+	for from, to := range copies {
+		if _, err := os.Lstat(from); err == nil {
+			t.Errorf("%s survived remove", from)
+		}
+		if _, err := os.Stat(to); err != nil {
+			t.Errorf("remove deleted the user's %s", to)
+		}
+	}
+}
+
+func TestDroppingAHarnessRemovesItsOwnedAgents(t *testing.T) {
+	f := newFixture(t)
+	f.mustRun("setup", "--harness", "claude,codex")
+	mine := filepath.Join(f.env.layout.Codex, "agents", "my-reviewer.toml")
+	writeFile(t, mine, "name = \"my-reviewer\"\n")
+
+	f.mustRun("setup", "--harness", "claude")
+
+	for _, tier := range allTiers {
+		if _, err := os.Lstat(filepath.Join(f.env.layout.Codex, "agents", tier+".toml")); err == nil {
+			t.Errorf("codex %s survived dropping codex", tier)
+		}
+	}
+	if _, err := os.Stat(mine); err != nil {
+		t.Error("dropping codex deleted the user's own agent")
 	}
 }
 

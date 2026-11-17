@@ -73,7 +73,7 @@ func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode s
 	if err := ui.Interrupted(ctx); err != nil {
 		return err
 	}
-	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Now: e.now, Selected: st.Harnesses}.Run(mode)
+	r, err := stack.Syncer{Source: st.Source, Layout: e.layout, Now: e.now, Selected: st.Harnesses, Owned: st.Agents}.Run(mode)
 	view := render.StackSummary
 	if mode == stack.Status {
 		view = render.StackStatus
@@ -86,6 +86,12 @@ func (e stackEnv) sync(ctx context.Context, w io.Writer, st source.State, mode s
 	}
 	if err != nil {
 		return failed(err)
+	}
+	if mode == stack.Link {
+		st.Agents = r.Agents
+		if err := source.SaveState(e.statePath(), st); err != nil {
+			return failed(err)
+		}
 	}
 	if r.Conflicts() > 0 {
 		return errConflicts
@@ -142,6 +148,9 @@ func newSetupCmd(e stackEnv) *cobra.Command {
 				return failed(err)
 			}
 			want.Harnesses = chosen
+			if prevErr == nil {
+				want.Agents = prev.Agents
+			}
 			if prevErr == nil && prev.Source != want.Source {
 				e.note(w, ui.Warn.Render("•"), "switching from "+prev.Source)
 				if err := e.sync(cmd.Context(), w, prev, stack.Detach); err != nil {
