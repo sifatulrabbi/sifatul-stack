@@ -9,7 +9,7 @@ SCRIPT = pathlib.Path(__file__).with_name("merge_findings.py")
 SKILL_DIR = SCRIPT.parent.parent
 
 
-def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134", severity: str | None = "high", kind: str | None = "behavior", title="PATCH has no ownership check", extra="", symptoms: str | None = None):
+def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134", severity: str | None = "high", kind: str | None = "behavior", title="PATCH has no ownership check", extra=""):
     head = ["---"]
     if file is not None:
         head.append(f"file: {file}")
@@ -19,8 +19,6 @@ def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134"
         head.append(f"severity: {severity}")
     if kind is not None:
         head.append(f"kind: {kind}")
-    if symptoms is not None:
-        head.append(f"symptoms: {symptoms}")
     head.append("---")
     body = textwrap.dedent(
         f"""
@@ -46,9 +44,9 @@ def verdict(status="confirmed", severity="high", proof="test", evidence="Test we
 
 
 class Round:
-    def __init__(self):
+    def __init__(self, name="round-1"):
         self._tmp = tempfile.TemporaryDirectory()
-        self.dir = pathlib.Path(self._tmp.name).resolve() / "round-1"
+        self.dir = pathlib.Path(self._tmp.name).resolve() / name
         (self.dir / "findings").mkdir(parents=True)
         (self.dir / "verified").mkdir()
         (self.dir / "jobs").mkdir()
@@ -73,6 +71,8 @@ class Round:
         cmd = [sys.executable, "-I", str(SCRIPT), mode, str(self.dir)]
         if mode == "merge":
             cmd += ["--review-tree", "/wt/review", "--worktree-base", "/wt"]
+        if mode == "fix":
+            cmd += ["--review-tree", "/wt/review", "--fixes-ref", "refs/full-review/fixes"]
         return subprocess.run(cmd + list(args), capture_output=True, text=True)
 
     def job(self, name):
@@ -83,6 +83,12 @@ class Round:
 
     def final(self):
         return (self.dir / "final.md").read_text()
+
+    def fixes(self, text):
+        (self.dir / "fixes.md").write_text(text)
+
+    def has_job(self, name):
+        return (self.dir / "jobs" / f"{name}.md").exists()
 
 
 class RoundTest(unittest.TestCase):
@@ -102,7 +108,7 @@ class MergeTest(RoundTest):
         self.assertEqual(self.r.jobs(), ["verify-1"])
         job = self.r.job("verify-1")
         self.assertIn(f"security-1: {self.r.dir}/findings/security/1.md", job)
-        self.assertIn(f"Role: {SKILL_DIR}/agents/verifier.md", job)
+        self.assertIn(f"Role: {SKILL_DIR}/agents/verifier-junior.md", job)
         self.assertIn("Code: /wt/review", job)
         self.assertIn("Scratch: /wt/verify-1", job)
         self.assertIn(f"Output: {self.r.dir}/verified/<id>.md", job)
@@ -193,7 +199,7 @@ class FinalTest(RoundTest):
 
         self.assertEqual(res.returncode, 0, res.stderr)
         final = self.r.final()
-        self.assertIn("- critical, confirmed (test): Lost write (b.ts:120-134), findings/correctness/1.md, verified/correctness-1.md\n", final)
+        self.assertIn(f"- critical, confirmed (test): Lost write (b.ts:120-134), {self.r.dir}/findings/correctness/1.md, {self.r.dir}/verified/correctness-1.md\n", final)
         self.assertLess(final.index("Lost write"), final.index("Weak check"))
 
 
@@ -224,7 +230,7 @@ class FinalTest(RoundTest):
         final = self.r.final()
         self.assertIn("unverified: 1", final)
         unverified = final[final.index("## Unverified"):]
-        self.assertIn("- high: Weak check (a.ts:120-134), findings/security/1.md\n", unverified)
+        self.assertIn(f"- high: Weak check (a.ts:120-134), {self.r.dir}/findings/security/1.md\n", unverified)
 
 
     def test_carries_alternatives_only_from_kept_findings(self):
@@ -333,34 +339,174 @@ class KindTest(RoundTest):
         self.assertEqual(res.returncode, 0, res.stderr)
 
 
-class SymptomsTest(RoundTest):
-    def test_accepts_symptoms_that_name_this_rounds_findings(self):
-        self.r.add("correctness", 1, finding())
-        self.r.add("correctness", 2, finding(file="src/b.ts"))
-        self.r.done("correctness")
-        self.r.add("root-cause", 1, finding(kind="design", symptoms="correctness-1, correctness-2"))
-        self.r.done("root-cause")
+PROVEN = dict(extra_meta="fix_check: pass\n", extra="\n## Regression test\nit fails\n")
+
+
+class VerifierAgentTest(RoundTest):
+    def test_sends_runnable_kinds_to_a_junior_and_the_rest_to_a_senior(self):
+        self.r.add("correctness", 1, finding(file="src/a.ts", kind="behavior"))
+        self.r.add("tests", 1, finding(file="src/b.ts", kind="test-gap"))
+        self.r.add("concurrency", 1, finding(file="src/c.ts", kind="scenario"))
+        self.r.add("related-prs", 1, finding(file="src/d.ts", kind=None))
+        for job in ("correctness", "tests", "concurrency", "related-prs"):
+            self.r.done(job)
 
         res = self.r.run("merge")
 
         self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("verify-1: junior", res.stdout)
+        self.assertIn("verify-2: senior", res.stdout)
+        junior, senior = self.r.job("verify-1"), self.r.job("verify-2")
+        self.assertIn("Agent: junior", junior)
+        self.assertIn("correctness-1", junior)
+        self.assertIn("tests-1", junior)
+        self.assertIn("Agent: senior", senior)
+        self.assertIn(f"Role: {SKILL_DIR}/agents/verifier.md", senior)
+        self.assertIn("concurrency-1", senior)
+        self.assertIn("related-prs-1", senior)
 
-    def test_refuses_symptoms_that_name_no_finding_or_a_root_cause(self):
+    def test_a_runnable_finding_overlapping_a_senior_one_goes_to_the_senior(self):
+        self.r.add("correctness", 1, finding(lines="10-20", kind="behavior"))
+        self.r.add("concurrency", 1, finding(lines="12", kind="scenario"))
+        self.r.done("correctness")
+        self.r.done("concurrency")
+
+        self.r.run("merge")
+
+        self.assertEqual(self.r.jobs(), ["verify-1"])
+        self.assertIn("Agent: senior", self.r.job("verify-1"))
+
+    def test_an_escalated_finding_goes_to_a_senior_with_the_juniors_attempt(self):
         self.r.add("correctness", 1, finding())
         self.r.done("correctness")
-        self.r.add("root-cause", 1, finding(kind="design", symptoms="correctness-1, correctness-9"))
-        self.r.add("carried", 1, finding(kind="design", symptoms="root-cause-1"))
-        self.r.done("root-cause")
-        self.r.done("carried")
+        self.r.run("merge")
+        self.r.verify("correctness-1", verdict(status="escalate", proof=None, evidence="Could not make it fail."))
 
         res = self.r.run("merge")
 
-        self.assertNotEqual(res.returncode, 0)
-        self.assertIn("findings/root-cause/1.md: symptoms", res.stderr)
-        self.assertIn("correctness-9", res.stderr)
-        self.assertNotIn("correctness-1,", res.stderr)
-        self.assertIn("findings/carried/1.md: symptoms", res.stderr)
-        self.assertEqual(self.r.jobs(), [])
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("verify-2: senior", res.stdout)
+        self.assertIn(f"correctness-1: {self.r.dir}/findings/correctness/1.md, escalated from {self.r.dir}/verified/correctness-1.md", self.r.job("verify-2"))
+
+    def test_an_escalated_finding_stays_unverified_until_a_senior_rules(self):
+        self.r.add("correctness", 1, finding())
+        self.r.done("correctness")
+        self.r.verify("correctness-1", verdict(status="escalate", proof=None))
+
+        res = self.r.run("final")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("unverified 1", res.stdout)
+        self.assertIn("unverified: 1", self.r.final())
+
+
+class FixTest(RoundTest):
+    def test_a_junior_gets_only_confirmed_findings_with_a_test_and_a_passing_fix(self):
+        self.r.add("correctness", 1, finding(file="src/a.ts"))
+        self.r.add("correctness", 2, finding(file="src/b.ts"))
+        self.r.add("correctness", 3, finding(file="src/c.ts"))
+        self.r.add("concurrency", 1, finding(file="src/d.ts", kind="scenario"))
+        self.r.done("correctness")
+        self.r.done("concurrency")
+        self.r.verify("correctness-1", verdict(**PROVEN))
+        self.r.verify("correctness-2", verdict(extra_meta="fix_check: fail\n", extra=PROVEN["extra"]))
+        self.r.verify("correctness-3", verdict(extra_meta="fix_check: pass\n"))
+        self.r.verify("concurrency-1", verdict(status="plausible", proof="trace", extra="\n## Judgment\nPath: a.\n"))
+
+        res = self.r.run("fix")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("4 to fix: 1 junior, 3 senior", res.stdout)
+        junior, senior = self.r.job("fixer-junior"), self.r.job("fixer-senior")
+        self.assertIn(f"- correctness-1: {self.r.dir}/findings/correctness/1.md, {self.r.dir}/verified/correctness-1.md", junior)
+        self.assertNotIn("correctness-2", junior)
+        self.assertIn("Code: /wt/review", junior)
+        self.assertIn("Pin: refs/full-review/fixes", junior)
+        self.assertIn(f"Role: {SKILL_DIR}/agents/fixer-senior.md", senior)
+        for finding_id in ("correctness-2", "correctness-3", "concurrency-1"):
+            self.assertIn(finding_id, senior)
+        self.assertNotIn("correctness-1", senior)
+
+    def test_leaves_dropped_and_related_pr_findings_to_the_review(self):
+        self.r.add("correctness", 1, finding())
+        self.r.add("related-prs", 1, finding(file="src/b.ts", kind=None))
+        self.r.done("correctness")
+        self.r.done("related-prs")
+        self.r.verify("correctness-1", verdict(status="refuted", proof=None))
+        self.r.verify("related-prs-1", verdict(proof="fact"))
+
+        res = self.r.run("fix")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("0 to fix", res.stdout)
+        self.assertFalse(self.r.has_job("fixer-junior"))
+        self.assertFalse(self.r.has_job("fixer-senior"))
+
+    def test_min_severity_keeps_lesser_findings_out_of_the_fix_jobs(self):
+        self.r.add("correctness", 1, finding(file="src/a.ts", severity="high"))
+        self.r.add("correctness", 2, finding(file="src/b.ts", severity="high"))
+        self.r.add("correctness", 3, finding(file="src/c.ts", severity="medium"))
+        self.r.done("correctness")
+        self.r.verify("correctness-1", verdict(**PROVEN))
+        self.r.verify("correctness-2", verdict(severity="low", **PROVEN))
+        self.r.verify("correctness-3", verdict(severity="medium", **PROVEN))
+
+        res = self.r.run("fix", "--min-severity", "high")
+
+        self.assertIn("1 to fix: 1 junior, 0 senior", res.stdout)
+        self.assertIn("correctness-1", self.r.job("fixer-junior"))
+        self.assertNotIn("correctness-2", self.r.job("fixer-junior"))
+
+
+class ReportTest(unittest.TestCase):
+    def setUp(self):
+        self.r1, self.r2 = Round("round-1"), Round("round-2")
+        self.addCleanup(self.r1.close)
+        self.addCleanup(self.r2.close)
+
+    def report(self):
+        res = self.r1.run("report", str(self.r2.dir))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return res.stdout, (self.r2.dir / "report.md").read_text()
+
+    def test_splits_the_runs_kept_findings_into_fixed_and_open(self):
+        self.r1.add("security", 1, finding(title="No ownership check"))
+        self.r1.add("security", 2, finding(file="src/b.ts", title="Token logged", severity="medium"))
+        self.r1.add("security", 3, finding(file="src/c.ts", title="Refuted one"))
+        self.r1.done("security")
+        self.r1.verify("security-1", verdict())
+        self.r1.verify("security-2", verdict(severity="medium"))
+        self.r1.verify("security-3", verdict(status="refuted", proof=None))
+        self.r1.fixes("# Fixes\n\n- security-1: fixed in a1b2c3d. requireOwner before load.\n- security-2: open. Needs the logging vendor's redaction setting.\n")
+        self.r2.add("lead", 1, finding(file="src/a.ts", title="Fix breaks admins", severity="critical"))
+        self.r2.done("lead")
+        self.r2.verify("lead-1", verdict(severity="critical"))
+
+        out, text = self.report()
+
+        fixed, rest = text.split("## Open")
+        still_open, dropped = rest.split("## Dropped")
+        self.assertIn("- round 1, security-1: No ownership check (src/api/users.ts:120-134), fixed in a1b2c3d. requireOwner before load.", fixed)
+        self.assertNotIn("Token logged", fixed)
+        self.assertLess(still_open.index("Fix breaks admins"), still_open.index("Token logged"))
+        self.assertIn(f"{self.r1.dir}/verified/security-2.md -- fixer: open. Needs the logging vendor's redaction setting.", still_open)
+        self.assertIn(f"{self.r2.dir}/findings/lead/1.md", still_open)
+        self.assertNotIn("Refuted one", fixed + still_open)
+        self.assertIn("- refuted: 1", dropped)
+        self.assertIn("fixed 1, open 2 (1 critical or high)", out)
+
+    def test_names_serious_findings_dropped_as_unproven(self):
+        self.r1.add("security", 1, finding(title="Maybe an injection", severity="critical"))
+        self.r1.add("security", 2, finding(file="src/b.ts", title="Maybe slow", severity="low"))
+        self.r1.done("security")
+        self.r1.verify("security-1", verdict(status="unproven", severity="critical", proof=None))
+        self.r1.verify("security-2", verdict(status="unproven", severity="low", proof=None))
+        self.r2.done("lead")
+
+        _, text = self.report()
+
+        self.assertIn("- unproven: 2", text)
+        self.assertIn("- unproven at critical or high: Maybe an injection", text)
 
 
 if __name__ == "__main__":

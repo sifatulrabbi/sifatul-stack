@@ -16,7 +16,7 @@ Every fixer follows this. Your job file has all the paths; reread it whenever yo
 
 ## Recording outcomes
 
-Write each finding's outcome to `Output` as soon as you settle it, in the `fixes.md` format from the format reference. If the file already has an item for that id, replace it. Write just enough for the next agent to pick it up.
+Write each finding's outcome to `Output` as soon as you settle it, in the `fixes.md` format from the format reference. If the file already has an item for that id, replace it.
 
 ## Notes file
 

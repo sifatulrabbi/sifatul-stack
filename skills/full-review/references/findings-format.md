@@ -40,10 +40,8 @@ Move ownership checks into a route-level middleware so new handlers get them by 
   - `test-gap`: a missing test, or a test that doesn't earn its keep.
   - `design`: a decision in this change (a boundary, data shape, format, protocol, dependency) that causes or invites failures.
   - `instructions`: text an agent or person follows (a prompt, skill, agent role, runbook) that will lead them wrong.
-- `symptoms` (root causes only): the comma-separated ids of the kept findings this design finding causes, all from the same round. Merge refuses an id that names no finding in the round or names another root cause.
 - `## Trigger`: how to make it go wrong. The verifier starts here, so make it concrete. For a scenario, specify the reproduction setup: the starting state, the ordering, timing, or fault, and how to force it.
 - `## Fix`: the smallest change that closes the gap.
-- `carried_from` (carried findings only): the previous round's verdict file for this finding, which the verifier reruns.
 - `## Alternative` (optional): the bigger root-cause direction, when the real gap deserves more than the smallest fix (a redesign, a new layer, replacing a framework). It carries no severity and reaches the review only if its finding survives verification.
 
 ## Specialist done file: `findings/<job>/_done.md`
@@ -90,8 +88,8 @@ it("rejects PATCH on another user", async () => {
 ## Notes
 ````
 
-- `status`: `confirmed` | `plausible` | `unproven` | `refuted` | `duplicate`. Only confirmed and plausible reach the user.
-- `proof` (confirmed and plausible): `test` | `run` | `fact` | `trace`, as defined in the verifier role.
+- `status`: `confirmed` | `plausible` | `unproven` | `refuted` | `duplicate` | `escalate`, as defined in the verify protocol. Only confirmed and plausible reach the user.
+- `proof` (confirmed and plausible): `test` | `run` | `fact` | `trace`, as defined in the verify protocol.
 - `fix_check`: `pass` when the finding's `## Fix` closed the failure (the reproduction went green; for a test-gap, the suite went red with the mutation and green without it), `fail` when it didn't; omit without a reproduction or when the Fix deletes or rewrites a test.
 - `severity`: the final severity; explain a change in `## Notes`.
 - `duplicate_of`: the id of the finding kept instead, when status is `duplicate`.
@@ -100,7 +98,7 @@ it("rejects PATCH on another user", async () => {
 - `## Evidence`: the first line is the one-line reason shown for dropped findings, so lead with the verdict's reason.
 - `## Judgment` (plausible only): Path, Guards searched, Blocked by, Settles it, one line each.
 - `## Regression test`: a test that went red on the bug or mutation, only when it passes the gate below; omit otherwise.
-- `## Notes`: severity changes, `fix_check: fail` reasons, and the sibling probe's `class:` line.
+- `## Notes`: severity changes and `fix_check: fail` reasons.
 
 ### Regression-test gate
 
@@ -122,10 +120,11 @@ One list item per finding the fixers took, in the order they were settled. No fr
 - security-1: fixed in a1b2c3d. requireOwner before load; regression test added.
 - correctness-3: fixed in d4e5f6a. Also updated billing/invoice.ts and its test, which asserted the old rounding.
 - tests-4: handed off. The fix also needs src/jobs/retry.ts.
-- api-1: needs impact decision, commit 9f8e7d6. GET /orders `total` becomes a number; web and mobile clients read it as a string.
-- data-1: blocked. Proving the fix needs Postgres 15; run `docker compose up db` or give a DSN.
-- architecture-1: deferred. The fix becomes moving authz into middleware; scope call needed.
+- api-1: open. GET /orders `total` becomes a number; web and mobile clients read it as a string. Decide whether they change with it.
+- data-1: open. Proving the fix needs Postgres 15; run `docker compose up db` or give a DSN.
+- architecture-1: open. The fix becomes moving authz into middleware; scope call needed.
 ```
 
-- Outcomes: `fixed in <sha>`, `handed off` (junior fixer only), `needs impact decision`, `blocked`, `deferred`.
+- Each item is `- <finding id>: <outcome>. <details>` on one line; the report script reads the id and whether the outcome starts with `fixed in`.
+- Outcomes: `fixed in <sha>`, `handed off` (junior fixer only), `open`.
 - Every open item ends with what the user must decide or provide.

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Merge specialist findings into verifier jobs, then assemble the round's final list.
+"""Turn a round's findings into verifier jobs, its final list, and fixer jobs, then report on the run.
 
 Usage:
   merge_findings.py merge <round-dir> --review-tree <path> --worktree-base <path> [--batch-size 8]
   merge_findings.py final <round-dir>
+  merge_findings.py fix <round-dir> --review-tree <path> --fixes-ref <ref> [--min-severity high]
+  merge_findings.py report <round-dir> [<later-round-dir> ...]
 """
 
 import argparse
@@ -13,9 +15,10 @@ import sys
 
 SKILL_DIR = pathlib.Path(__file__).resolve().parent.parent
 SEV = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-STATUSES = ("confirmed", "plausible", "refuted", "unproven", "duplicate")
+STATUSES = ("confirmed", "plausible", "refuted", "unproven", "duplicate", "escalate")
 KEPT = ("confirmed", "plausible")
 KINDS = ("behavior", "scenario", "test-gap", "design", "instructions")
+RUNNABLE = ("behavior", "test-gap")
 PROOFS = ("test", "run", "fact", "trace")
 UNKINDED = "related-prs"
 
@@ -93,24 +96,10 @@ def load_findings(round_dir):
                     "severity": meta["severity"],
                     "title": title,
                     "sections": sections,
-                    "symptoms": [i.strip() for i in meta.get("symptoms", "").split(",") if i.strip()],
+                    "kind": meta.get("kind", ""),
                 }
             )
-    return findings, errors + symptom_errors(round_dir, findings)
-
-
-def symptom_errors(round_dir, findings):
-    ids = {f["id"] for f in findings}
-    root_causes = {f["id"] for f in findings if f["symptoms"]}
-    errors = []
-    for f in findings:
-        rel = f["path"].relative_to(round_dir)
-        for i in f["symptoms"]:
-            if i not in ids:
-                errors.append(f"{rel}: symptoms names {i}, which is not a finding in this round")
-            elif i in root_causes:
-                errors.append(f"{rel}: symptoms names {i}, which is itself a root cause")
-    return errors
+    return findings, errors
 
 
 def fail(errors):
@@ -158,11 +147,27 @@ def location(file, lines):
     return f"{file}:{lines[0]}-{lines[1]}" if lines[0] != lines[1] else f"{file}:{lines[0]}"
 
 
-def write_job(round_dir, name, clusters, review_tree, worktree_base):
+def escalated(round_dir, f):
+    path = round_dir / "verified" / f"{f['id']}.md"
+    try:
+        return path.exists() and read_md(path)[0].get("status") == "escalate"
+    except Malformed:
+        return False
+
+
+def agent_for(cluster):
+    runnable = all(f["kind"] in RUNNABLE and not f["escalated"] for f in cluster["members"])
+    return "junior" if runnable else "senior"
+
+
+def write_verifier_job(round_dir, name, agent, clusters, review_tree, worktree_base):
+    role = "verifier-junior.md" if agent == "junior" else "verifier.md"
     lines = [
         f"# Job: {name}",
         "",
-        f"Role: {SKILL_DIR}/agents/verifier.md",
+        f"Agent: {agent}",
+        f"Role: {SKILL_DIR}/agents/{role}",
+        f"Protocol: {SKILL_DIR}/references/verify-protocol.md",
         f"Format: {SKILL_DIR}/references/findings-format.md",
         f"Severity: {SKILL_DIR}/references/severity-rubric.md",
         f"Brief: {round_dir}/brief.md",
@@ -175,7 +180,9 @@ def write_job(round_dir, name, clusters, review_tree, worktree_base):
     ]
     for c in clusters:
         lines += ["", f"### {location(c['file'], c['lines'])}", ""]
-        lines += [f"- {f['id']}: {f['path']}" for f in c["members"]]
+        for f in c["members"]:
+            earlier = f", escalated from {round_dir}/verified/{f['id']}.md" if f["escalated"] else ""
+            lines.append(f"- {f['id']}: {f['path']}{earlier}")
     (round_dir / "jobs" / f"{name}.md").write_text("\n".join(lines) + "\n")
 
 
@@ -183,15 +190,22 @@ def merge(round_dir, review_tree, worktree_base, batch_size):
     findings, errors = load_findings(round_dir)
     if errors:
         fail(errors)
-    pending = [f for f in findings if not (round_dir / "verified" / f"{f['id']}.md").exists()]
+    for f in findings:
+        f["escalated"] = escalated(round_dir, f)
+    pending = [f for f in findings if f["escalated"] or not (round_dir / "verified" / f"{f['id']}.md").exists()]
     clusters = cluster(pending)
-    planned = batches(clusters, batch_size)
+    planned = [
+        (agent, group)
+        for agent in ("junior", "senior")
+        for group in batches([c for c in clusters if agent_for(c) == agent], batch_size)
+    ]
     jobs_dir = round_dir / "jobs"
     jobs_dir.mkdir(exist_ok=True)
     last = max((int(m.group(1)) for p in jobs_dir.glob("verify-*.md") if (m := re.fullmatch(r"verify-(\d+)", p.stem))), default=0)
-    for n, group in enumerate(planned, last + 1):
-        write_job(round_dir, f"verify-{n}", group, review_tree, worktree_base)
     print(f"{len(findings)} findings, {len(findings) - len(pending)} already verified, {len(clusters)} clusters, {len(planned)} verifier jobs")
+    for n, (agent, group) in enumerate(planned, last + 1):
+        write_verifier_job(round_dir, f"verify-{n}", agent, group, review_tree, worktree_base)
+        print(f"verify-{n}: {agent}")
 
 
 def verdict_of(round_dir, f):
@@ -215,36 +229,56 @@ def verdict_of(round_dir, f):
         "severity": meta.get("severity") if meta.get("severity") in SEV else f["severity"],
         "duplicate_of": meta.get("duplicate_of", ""),
         "alternative": meta.get("alternative", ""),
+        "fix_check": meta.get("fix_check", ""),
+        "regression_test": bool(sections.get("Regression test")),
         "reason": evidence.splitlines()[0] if evidence else "",
     }
 
 
-def final(round_dir):
+def judge(round_dir):
     findings, errors = load_findings(round_dir)
     if errors:
         fail(errors)
-    clusters = cluster(findings)
+    ordered = [f for c in cluster(findings) for f in c["members"]]
     verdicts = {}
-    for c in clusters:
-        for f in c["members"]:
-            try:
-                verdicts[f["id"]] = verdict_of(round_dir, f)
-            except Malformed as e:
-                errors.append(f"verified/{f['id']}.md: {e}")
+    for f in ordered:
+        try:
+            verdicts[f["id"]] = verdict_of(round_dir, f)
+        except Malformed as e:
+            errors.append(f"verified/{f['id']}.md: {e}")
     if errors:
         fail(errors)
     kept, dropped, unverified = [], [], []
-    for c in clusters:
-        for f in c["members"]:
-            v = verdicts[f["id"]]
-            if v and v["status"] in KEPT:
-                kept.append((f, v))
-            elif not v:
-                unverified.append(f)
-            else:
-                reason = f"Duplicate of {v['duplicate_of']}." if v["status"] == "duplicate" and v["duplicate_of"] else v["reason"]
-                dropped.append((v["status"], f, reason))
+    for f in ordered:
+        v = verdicts[f["id"]]
+        if not v or v["status"] == "escalate":
+            unverified.append(f)
+        elif v["status"] in KEPT:
+            kept.append((f, v))
+        else:
+            dropped.append((f, v))
     kept.sort(key=lambda fv: (SEV[fv[1]["severity"]], fv[1]["status"] != "confirmed", fv[0]["file"], fv[0]["lines"][0]))
+    return kept, dropped, unverified
+
+
+def serious(kept):
+    return sum(1 for _, v in kept if SEV[v["severity"]] <= SEV["high"])
+
+
+def kept_line(f, v):
+    return f"- {v['severity']}, {v['status']} ({v['proof']}): {f['title']} ({location(f['file'], f['lines'])}), {f['path']}, {v['path']}"
+
+
+def alternatives(kept, label=lambda f: f["id"]):
+    out = []
+    for f, v in kept:
+        if f["sections"].get("Alternative") and v["alternative"] != "drop":
+            out += ["", f"### {f['title']} ({label(f)})", "", f["sections"]["Alternative"]]
+    return out
+
+
+def final(round_dir):
+    kept, dropped, unverified = judge(round_dir)
     out = [
         "---",
         f"kept: {len(kept)}",
@@ -257,48 +291,118 @@ def final(round_dir):
         "## Kept",
         "",
     ]
-    for f, v in kept:
-        out.append(
-            f"- {v['severity']}, {v['status']} ({v['proof']}): {f['title']} ({location(f['file'], f['lines'])}), "
-            f"{f['path'].relative_to(round_dir)}, {v['path'].relative_to(round_dir)}"
-        )
-    alternatives = [(f, f["sections"]["Alternative"]) for f, v in kept if f["sections"].get("Alternative") and v["alternative"] != "drop"]
-    if alternatives:
-        out += ["", "## Alternative directions"]
-        for f, text in alternatives:
-            out += ["", f"### {f['title']} ({f['id']})", "", text]
-    out += [
-        "",
-        "## Dropped",
-        "",
-    ]
-    for status, f, reason in dropped:
-        out.append(f"- {status}: {f['title']} ({location(f['file'], f['lines'])}).{' ' + reason if reason else ''}")
-    out += [
-        "",
-        "## Unverified",
-        "",
-    ]
+    out += [kept_line(f, v) for f, v in kept]
+    directions = alternatives(kept)
+    if directions:
+        out += ["", "## Alternative directions"] + directions
+    out += ["", "## Dropped", ""]
+    for f, v in dropped:
+        reason = f"Duplicate of {v['duplicate_of']}." if v["status"] == "duplicate" and v["duplicate_of"] else v["reason"]
+        out.append(f"- {v['status']}: {f['title']} ({location(f['file'], f['lines'])}).{' ' + reason if reason else ''}")
+    out += ["", "## Unverified", ""]
     for f in sorted(unverified, key=lambda f: (SEV[f["severity"]], f["file"], f["lines"][0])):
-        out.append(f"- {f['severity']}: {f['title']} ({location(f['file'], f['lines'])}), {f['path'].relative_to(round_dir)}")
+        out.append(f"- {f['severity']}: {f['title']} ({location(f['file'], f['lines'])}), {f['path']}")
     (round_dir / "final.md").write_text("\n".join(out) + "\n")
+    print(f"kept {len(kept)} ({serious(kept)} critical or high), dropped {len(dropped)}, unverified {len(unverified)}")
+
+
+def write_fixer_job(round_dir, agent, todo, review_tree, fixes_ref):
+    name = f"fixer-{agent}"
+    lines = [
+        f"# Job: {name}",
+        "",
+        f"Agent: {agent}",
+        f"Role: {SKILL_DIR}/agents/{name}.md",
+        f"Protocol: {SKILL_DIR}/references/fix-protocol.md",
+        f"Format: {SKILL_DIR}/references/findings-format.md",
+        f"Brief: {round_dir}/brief.md",
+        f"Code: {review_tree}",
+        f"Pin: {fixes_ref}",
+        f"Notes: {round_dir}/notes/{name}.md",
+        f"Output: {round_dir}/fixes.md",
+        "",
+        "## Findings",
+        "",
+    ]
+    lines += [f"- {f['id']}: {f['path']}, {v['path']}" for f, v in todo]
+    (round_dir / "jobs" / f"{name}.md").write_text("\n".join(lines) + "\n")
+
+
+def fix(round_dir, review_tree, fixes_ref, min_severity):
+    kept, _, _ = judge(round_dir)
+    todo = [(f, v) for f, v in kept if f["category"] != UNKINDED and SEV[v["severity"]] <= SEV[min_severity]]
+    if not todo:
+        print("0 to fix")
+        return
+    proven = [(f, v) for f, v in todo if v["status"] == "confirmed" and v["fix_check"] == "pass" and v["regression_test"]]
+    rest = [fv for fv in todo if fv not in proven]
+    if proven:
+        write_fixer_job(round_dir, "junior", proven, review_tree, fixes_ref)
+    write_fixer_job(round_dir, "senior", rest, review_tree, fixes_ref)
+    print(f"{len(todo)} to fix: {len(proven)} junior, {len(rest)} senior")
+
+
+def fix_outcomes(round_dir):
+    path = round_dir / "fixes.md"
+    if not path.exists():
+        return {}
+    items = (re.fullmatch(r"- ([\w-]+): (.+)", line) for line in path.read_text().splitlines())
+    return {m.group(1): m.group(2) for m in items if m}
+
+
+def report(round_dirs):
+    fixed, still_open, directions, counts, unproven = [], [], [], {}, []
+    for n, round_dir in enumerate(round_dirs, 1):
+        kept, dropped, _ = judge(round_dir)
+        outcomes = fix_outcomes(round_dir)
+        for f, v in kept:
+            outcome = outcomes.get(f["id"], "")
+            if outcome.startswith("fixed in "):
+                fixed.append(f"- round {n}, {f['id']}: {f['title']} ({location(f['file'], f['lines'])}), {outcome}")
+            else:
+                still_open.append((f, v, kept_line(f, v) + (f" -- fixer: {outcome}" if outcome else "")))
+        directions += alternatives(kept, lambda f: f"round {n}, {f['id']}")
+        for f, v in dropped:
+            counts[v["status"]] = counts.get(v["status"], 0) + 1
+            if v["status"] == "unproven" and SEV[v["severity"]] <= SEV["high"]:
+                unproven.append(f["title"])
+    still_open.sort(key=lambda fvl: SEV[fvl[1]["severity"]])
+    out = ["# Report", "", "## Fixed", ""] + fixed + ["", "## Open", ""] + [line for _, _, line in still_open]
+    if directions:
+        out += ["", "## Alternative directions"] + directions
+    out += ["", "## Dropped", ""]
+    out += [f"- {status}: {counts[status]}" for status in STATUSES if status in counts]
+    out.append(f"- unproven at critical or high: {'; '.join(unproven) or 'none'}")
+    path = round_dirs[-1] / "report.md"
+    path.write_text("\n".join(out) + "\n")
+    print(f"fixed {len(fixed)}, open {len(still_open)} ({serious([(f, v) for f, v, _ in still_open])} critical or high), {path}")
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Merge review findings and assemble the final list.")
-    ap.add_argument("mode", choices=["merge", "final"])
-    ap.add_argument("round_dir")
+    ap = argparse.ArgumentParser(description="Merge review findings, assemble the final list, route fixes, report the run.")
+    ap.add_argument("mode", choices=["merge", "final", "fix", "report"])
+    ap.add_argument("round_dirs", nargs="+")
     ap.add_argument("--review-tree")
     ap.add_argument("--worktree-base")
+    ap.add_argument("--fixes-ref")
+    ap.add_argument("--min-severity", choices=list(SEV), default="low")
     ap.add_argument("--batch-size", type=int, default=8)
     args = ap.parse_args()
-    round_dir = pathlib.Path(args.round_dir).resolve()
+    round_dirs = [pathlib.Path(d).resolve() for d in args.round_dirs]
+    if args.mode != "report" and len(round_dirs) > 1:
+        ap.error(f"{args.mode} takes one round dir")
     if args.mode == "merge":
         if not (args.review_tree and args.worktree_base):
             ap.error("merge needs --review-tree and --worktree-base")
-        merge(round_dir, args.review_tree, args.worktree_base, args.batch_size)
+        merge(round_dirs[0], args.review_tree, args.worktree_base, args.batch_size)
+    elif args.mode == "final":
+        final(round_dirs[0])
+    elif args.mode == "fix":
+        if not (args.review_tree and args.fixes_ref):
+            ap.error("fix needs --review-tree and --fixes-ref")
+        fix(round_dirs[0], args.review_tree, args.fixes_ref, args.min_severity)
     else:
-        final(round_dir)
+        report(round_dirs)
 
 
 if __name__ == "__main__":
