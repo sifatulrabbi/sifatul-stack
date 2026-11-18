@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage="usage: init_run.sh <target: pr<n> or branch> <head-ref>"
-target="${1:?$usage}"
-target="${target//\//-}"
+usage="usage: init_run.sh <target: pr/<n>, branch/<name>, or wip/<branch>> <head-ref>"
+source "$(dirname "$0")/run_paths.sh"
+run_paths "${1:?$usage}"
 head="$(git rev-parse --verify "${2:?$usage}^{commit}")"
 
-root="$(git rev-parse --show-toplevel)"
-repo="$(basename "$root")"
-
-if [ -d "$root/.planning" ]; then
-  target_dir="$root/.planning/full-review/$target"
+if [ -d "$REPO_ROOT/.planning" ]; then
+  target_dir="$REPO_ROOT/.planning/full-review/$TARGET_KEY"
 else
-  target_dir="/tmp/full-review/$repo/$target"
+  target_dir="/tmp/full-review/$REPO_KEY/$TARGET_KEY"
 fi
 mkdir -p "$target_dir"
 
@@ -41,7 +38,7 @@ round_dir="$target_dir/round-$round"
 mkdir -p "$round_dir/jobs" "$round_dir/notes" "$round_dir/findings" "$round_dir/verified"
 [ -f "$round_dir/round.md" ] || printf -- '---\nhead: %s\n---\n' "$head" >"$round_dir/round.md"
 
-wt_base="/tmp/full-review-worktrees/$repo/$target/round-$round"
+wt_base="$WORKTREES_DIR/round-$round"
 review_tree="$wt_base/review"
 if [ ! -d "$review_tree" ]; then
   mkdir -p "$wt_base"
@@ -53,4 +50,4 @@ echo "ROUND_DIR=$round_dir"
 echo "PREV_ROUND_DIR=$prev"
 echo "REVIEW_TREE=$review_tree"
 echo "WORKTREE_BASE=$wt_base"
-echo "FIXES_REF=refs/full-review/$target/fixes"
+echo "FIXES_REF=$FIXES_REF"

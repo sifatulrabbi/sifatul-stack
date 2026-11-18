@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-target="${1:?usage: cleanup_run.sh <target: pr<n> or branch>}"
-target="${target//\//-}"
-repo="$(basename "$(git rev-parse --show-toplevel)")"
-wt_target="/tmp/full-review-worktrees/$repo/$target"
+source "$(dirname "$0")/run_paths.sh"
+run_paths "${1:?usage: cleanup_run.sh <target: pr/<n>, branch/<name>, or wip/<branch>>}"
 
-if [ -d "$wt_target" ]; then
-  for wt in "$wt_target"/round-*/*/; do
+if [ -d "$WORKTREES_DIR" ]; then
+  for wt in "$WORKTREES_DIR"/round-*/*/; do
     [ -d "$wt" ] && git worktree remove --force "$wt" 2>/dev/null || true
   done
-  rm -rf "$wt_target"
-  rmdir "${wt_target%/*}" 2>/dev/null || true
+  rm -rf "$WORKTREES_DIR"
+  rmdir "${WORKTREES_DIR%/*}" "${WORKTREES_DIR%/*/*}" 2>/dev/null || true
 fi
 git worktree prune
-fixes_ref="refs/full-review/$target/fixes"
-git show-ref --verify --quiet "$fixes_ref" && git update-ref -d "$fixes_ref"
-echo "Removed worktrees for $target"
+git show-ref --verify --quiet "$FIXES_REF" && git update-ref -d "$FIXES_REF"
+echo "Removed worktrees for $1"
