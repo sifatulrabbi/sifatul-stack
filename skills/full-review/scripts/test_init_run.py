@@ -21,6 +21,7 @@ class Repo:
     def __init__(self, test, path):
         self.test = test
         self.path = path
+        self.env = ENV
 
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.path, env=ENV, check=True, capture_output=True, text=True).stdout.strip()
@@ -38,7 +39,7 @@ class Repo:
         return Repo(self.test, path)
 
     def run(self, script, *args):
-        return subprocess.run(["bash", str(SCRIPTS / script), *args], cwd=self.path, env=ENV, capture_output=True, text=True)
+        return subprocess.run(["bash", str(SCRIPTS / script), *args], cwd=self.path, env=self.env, capture_output=True, text=True)
 
     def sh(self, script, *args):
         res = self.run(script, *args)
@@ -194,6 +195,17 @@ class InitRunTest(unittest.TestCase):
         other.sh("cleanup_run.sh", "pr/8")
 
         self.assertEqual(main.git("rev-parse", fixes), head)
+
+    def test_keeps_run_state_under_the_users_temp_dir(self):
+        repo = self.make_repo("plain", planning=False)
+        head = repo.commit("a")
+        root = self.tmp / "private"
+        repo.env = {**ENV, "TMPDIR": f"{root}/"}
+
+        out = repo.sh("init_run.sh", "pr/1", head)
+
+        self.assertTrue(out["ROUND_DIR"].startswith(f"{root}/full-review/"))
+        self.assertTrue(out["REVIEW_TREE"].startswith(f"{root}/full-review-worktrees/"))
 
     def test_refuses_a_target_without_a_kind_and_a_name(self):
         for target in ["pr7", "pr", "pr/", "x/1"]:

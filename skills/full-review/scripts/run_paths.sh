@@ -1,5 +1,5 @@
 run_paths() {
-  local target="$1" kind name gitdir
+  local target="$1" kind name gitdir tmp
   kind="${target%%/*}"
   name="${target#*/}"
   case "$kind" in
@@ -16,11 +16,13 @@ run_paths() {
   REPO_ROOT="$(git rev-parse --show-toplevel)"
   REPO_KEY="$(basename "$REPO_ROOT")-$(printf '%s' "$gitdir" | git hash-object --stdin | cut -c1-8)"
   TARGET_KEY="$kind/$name"
+  tmp="${TMPDIR:-/tmp}"
+  tmp="${tmp%/}"
   if [ -d "$REPO_ROOT/.planning" ]; then
     TARGET_DIR="$REPO_ROOT/.planning/full-review/$TARGET_KEY"
   else
-    TARGET_DIR="/tmp/full-review/$REPO_KEY/$TARGET_KEY"
+    TARGET_DIR="$tmp/full-review/$REPO_KEY/$TARGET_KEY"
   fi
-  WORKTREES_DIR="/tmp/full-review-worktrees/$REPO_KEY/$TARGET_KEY"
+  WORKTREES_DIR="$tmp/full-review-worktrees/$REPO_KEY/$TARGET_KEY"
   FIXES_REF="refs/full-review/$REPO_KEY/$TARGET_KEY/fixes"
 }
