@@ -154,7 +154,8 @@ def hunk_kind(h, prose):
     removed = [l for l in h["removed"] if l.strip()]
     added = [l for l in h["added"] if l.strip()]
     squash = lambda ls: sorted(re.sub(r"\s+", "", l) for l in ls)
-    if squash(removed) == squash(added):
+    spaced = lambda ls: [re.sub(r"\s+", " ", l).strip() for l in ls]
+    if (spaced(removed) == spaced(added)) if prose else (squash(removed) == squash(added)):
         return "whitespace"
     if not prose and all(is_comment(l) for l in removed + added):
         return "comment"

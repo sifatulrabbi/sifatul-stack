@@ -108,6 +108,15 @@ class ClassifyHunksTest(unittest.TestCase):
             self.assertIn(f"| {path} |", semantic)
         self.assertIn("### docs\n\n- README.md", mechanical)
 
+    def test_joining_words_in_an_instruction_file_is_semantic(self):
+        self.repo.write("skills/x/SKILL.md", "You can not skip this.\n")
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        self.repo.write("skills/x/SKILL.md", "You cannot skip this.\n")
+        self.repo.commit()
+
+        self.assertIn("| skills/x/SKILL.md |", self.repo.hunks().split("## Mechanical")[0])
+
 
 if __name__ == "__main__":
     unittest.main()
