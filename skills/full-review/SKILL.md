@@ -59,7 +59,7 @@ Run `SKILL_DIR/scripts/init_run.sh <target> <head-sha>` from the repo root. Roun
 Size is semantic surface and risk, never file count: 100 files of renames is small, three files rewriting auth is not. Choose a path:
 
 - **Stop and ask** if the intent clearly doesn't match the diff, or the PR bundles independent changes that should be reviewed separately. Explain, propose a split, and continue only if the user says so.
-- **Solo** for a small, low-risk semantic surface with an empty decision inventory: write the brief, then review it yourself following `references/specialist-protocol.md` with output `ROUND_DIR/findings/lead/`, working through the "How to work" sections of the matching roles in this order: architecture, correctness, tests. Then go to step 5. Your findings get verified like everyone else's.
+- **Solo** for a small, low-risk semantic surface with an empty decision inventory: write the brief, then review it yourself following `references/specialist-protocol.md` with output `ROUND_DIR/findings/lead/`, working through the "How to work" sections of the matching roles in this order: architecture, correctness, instructions (when the change touches text agents or people follow), tests. Then go to step 5. Your findings get verified like everyone else's.
 - **Team** for everything else.
 
 ## 3. Brief and routing
