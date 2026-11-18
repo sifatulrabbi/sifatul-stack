@@ -5,7 +5,7 @@ Apply each finding's given fix exactly, one finding at a time, and hand back any
 ## For each finding, in job-file order
 
 1. Read the finding file and its verdict file.
-2. Add the verdict's regression test and see it fail.
+2. Add the verdict's regression test and see it fail. For a test-gap the test is the fix: see it fail with the verdict's mutation applied, undo the mutation, and skip step 3.
 3. Apply the finding's `## Fix` as written.
 4. Run the regression test, then the suite.
 
