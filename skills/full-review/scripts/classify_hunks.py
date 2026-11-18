@@ -4,7 +4,7 @@
 Usage: classify_hunks.py --base <ref> [--head <ref>] [-o hunks.md]
 
 Kinds: whitespace, comment, lockfile, generated, rename, docs, binary, semantic.
-Instruction files agents read (skills, agent prompts, AGENTS.md) are never docs or comments.
+Instruction files agents read (skills, agent prompts, AGENTS.md, rule files) are never docs or comments; code under their directories still is code.
 These are heuristics; the lead skims non-semantic hunks before excluding them.
 """
 
@@ -52,8 +52,9 @@ GENERATED_DIRS = [
 ]
 GENERATED_MARKER = re.compile(r"@generated|DO NOT EDIT|auto-?generated", re.I)
 DOC_EXTS = (".md", ".mdx", ".rst", ".txt", ".adoc")
-INSTRUCTION_NAMES = {"SKILL.md", "AGENTS.md", "CLAUDE.md"}
-INSTRUCTION_DIRS = {"skills", "agents", "prompts", "instructions", "commands", ".claude", ".codex", ".opencode", ".agents", ".cursor"}
+INSTRUCTION_NAMES = ["SKILL.md", "*AGENTS*.md", "CLAUDE*.md", "GEMINI*.md", "copilot-instructions.md", ".cursorrules", ".windsurfrules", ".clinerules"]
+INSTRUCTION_DIRS = {"skills", "agents", "prompts", "instructions", "commands", ".claude", ".codex", ".opencode", ".agents", ".cursor", ".windsurf", ".gemini", ".clinerules"}
+PROMPT_EXTS = DOC_EXTS + (".toml", ".yaml", ".yml")
 COMMENT = re.compile(r"^\s*(//|/\*|\*|\*/|#|--|<!--|-->)")
 NOT_COMMENT = re.compile(
     r"^\s*#\s*(include|define|undef|if|ifdef|ifndef|elif|else|endif|pragma|import|!)"
@@ -128,7 +129,9 @@ def is_generated(path, head):
 
 def is_instructions(path):
     *dirs, name = path.split("/")
-    return name in INSTRUCTION_NAMES or any(d in INSTRUCTION_DIRS for d in dirs)
+    if any(fnmatch.fnmatch(name, n) for n in INSTRUCTION_NAMES):
+        return True
+    return name.lower().endswith(PROMPT_EXTS) and any(d in INSTRUCTION_DIRS for d in dirs)
 
 
 def file_kind(f, head):

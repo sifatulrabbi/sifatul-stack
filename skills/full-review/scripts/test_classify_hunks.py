@@ -92,7 +92,7 @@ class ClassifyHunksTest(unittest.TestCase):
 
     def test_instructions_agents_read_are_semantic_and_plain_docs_are_not(self):
         prose = "# Title\n\nDo the thing.\n"
-        paths = ["skills/review/SKILL.md", "agents/verifier.md", "AGENTS.md", ".claude/commands/ship.md", "README.md"]
+        paths = ["skills/review/SKILL.md", "agents/verifier.md", "AGENTS.md", ".claude/commands/ship.md", "GEMINI.md", ".github/copilot-instructions.md", ".cursorrules", "README.md"]
         for path in paths:
             self.repo.write(path, prose)
         self.repo.commit()
@@ -107,6 +107,15 @@ class ClassifyHunksTest(unittest.TestCase):
         for path in paths[:-1]:
             self.assertIn(f"| {path} |", semantic)
         self.assertIn("### docs\n\n- README.md", mechanical)
+
+    def test_code_under_an_instruction_dir_keeps_the_comment_label(self):
+        self.repo.write(".claude/commands/tool.py", "# old note\nx = 1\n")
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        self.repo.write(".claude/commands/tool.py", "# new note\nx = 1\n")
+        self.repo.commit()
+
+        self.assertIn("### comment\n\n- .claude/commands/tool.py: 1 · 2\n", self.repo.hunks())
 
     def test_joining_words_in_an_instruction_file_is_semantic(self):
         self.repo.write("skills/x/SKILL.md", "You can not skip this.\n")
