@@ -1,6 +1,6 @@
 ---
 name: full-review
-description: Multi-agent code review -- specialist reviewers chosen by risk, every finding verified by reproduction, one consolidated review. Use when the user asks to review or audit code changes, or to check them before merging.
+description: Multi-agent code review -- specialist reviewers chosen by risk, every finding proved by test, reproduction, or an auditable judgment, one consolidated review. Use when the user asks to review or audit code changes, or to check them before merging.
 ---
 
 # Full review -- lead
@@ -49,21 +49,22 @@ Run `SKILL_DIR/scripts/init_run.sh <target> <head-sha>` from the repo root. Roun
 
 ## 2. Triage
 
-1. `python3 SKILL_DIR/scripts/classify_hunks.py --base <base> --head <head-sha> -o ROUND_DIR/hunks.md`. It always diffs base to head, on a re-review too. It labels hunks as whitespace, comment, lockfile, generated, rename, docs, binary, or semantic. The labels are heuristics: skim the mechanical section (cheap) and treat anything that isn't really mechanical as semantic. Only semantic hunks go to specialists; lockfile hunks go to the dependencies specialist.
+1. `python3 SKILL_DIR/scripts/classify_hunks.py --base <base> --head <head-sha> -o ROUND_DIR/hunks.md`. It always diffs base to head, on a re-review too. It labels hunks as whitespace, comment, lockfile, generated, rename, docs, binary, or semantic. Instruction files agents read (skills, agent prompts, AGENTS.md) are always semantic. The labels are heuristics: skim the mechanical section (cheap) and treat anything that isn't really mechanical as semantic. Only semantic hunks go to specialists; lockfile hunks go to the dependencies specialist.
 2. Read the PR title and description, linked issue, CI results (`gh pr checks <n>`), and the semantic diff.
 3. **Related open PRs** (GitHub PRs only): launch an `associate` now with the job in "Related open PRs" below, listing the symbols this PR renames, removes, or changes the signature of; it runs while you finish triage.
 4. **Intent check:** does the diff do what the PR claims, and only that? Write each missing piece (a claimed behavior the diff doesn't deliver, a caller or migration it needs and lacks) as a finding in `ROUND_DIR/findings/lead/`, then write its `_done.md`; on the solo path, write `_done.md` after your review instead. Note unrelated changes and scope creep for the brief.
 5. **Risk map:** which parts of the change carry which risks (auth, data, public API, concurrency, rollout…).
+6. **Decision inventory:** the decisions this change makes that will be costly to reverse: a new module boundary, data shape or schema, wire or file format, protocol, dependency, or concurrency model. One line each with its location, or `none`.
 
 Size is semantic surface and risk, never file count: 100 files of renames is small, three files rewriting auth is not. Choose a path:
 
 - **Stop and ask** if the intent clearly doesn't match the diff, or the PR bundles independent changes that should be reviewed separately. Explain, propose a split, and continue only if the user says so.
-- **Solo** for a small, low-risk semantic surface: write the brief, then review it yourself following `references/specialist-protocol.md` with output `ROUND_DIR/findings/lead/`, then go to step 5. Your findings get verified like everyone else's.
+- **Solo** for a small, low-risk semantic surface with an empty decision inventory: write the brief, then review it yourself following `references/specialist-protocol.md` with output `ROUND_DIR/findings/lead/`, working through the "How to work" sections of the matching roles in this order: architecture, correctness, tests. Then go to step 5. Your findings get verified like everyone else's.
 - **Team** for everything else.
 
 ## 3. Brief and routing
 
-Write `ROUND_DIR/brief.md`: base and head, `REVIEW_TREE`, intent (claimed vs actual), risk map, repo convention files to honor (REVIEW.md, CLAUDE.md, CONTRIBUTING.md, if present), what CI and linters already reported so nobody repeats it, related open PRs that overlap this one (number, title, shared files, from `related-prs.md`: wait for it), and what's out of scope. On a re-review, add the "Already decided" section described below.
+Write `ROUND_DIR/brief.md`: base and head, `REVIEW_TREE`, intent (claimed vs actual), risk map, decision inventory, repo convention files to honor (REVIEW.md, CLAUDE.md, CONTRIBUTING.md, if present), what CI and linters already reported so nobody repeats it, related open PRs that overlap this one (number, title, shared files, from `related-prs.md`: wait for it), and what's out of scope. On a re-review, add the "Already decided" section described below.
 
 Each specialist owns its whole concern area across every file it touches: one job per concern, whatever the file count. Launch only specialists whose trigger matches the risk map. Every specialist runs on `senior`: reviewing is judgment and discovery, which a `junior` can't verify its way through. Correctness runs on nearly every team review.
 
@@ -71,7 +72,7 @@ Launch each specialist when the semantic change touches:
 
 - **correctness**: Any logic (default for team reviews)
 - **security**: Auth, permissions, input parsing, external requests, file paths, secrets, crypto, user data, queries built from input
-- **architecture**: New modules, services or classes; cross-layer imports; moved responsibilities; a new pattern
+- **architecture**: New modules, services or classes; cross-layer imports; moved responsibilities; a new pattern; any item in the decision inventory
 - **concurrency**: Async code, threads, locks, queues, shared mutable state, retries, timeouts
 - **data-migrations**: Schema files, migrations, backfills, ORM models
 - **tests**: Any behavior change, or test files: missing regression tests and tests that don't earn their keep
@@ -80,6 +81,7 @@ Launch each specialist when the semantic change touches:
 - **api-compat**: Public APIs, exported functions, request/response schemas, events, CLI flags, config formats
 - **dependencies**: Manifests or lockfiles
 - **ops-rollout**: Config, feature flags, logging, metrics, deploy files, anything hard to roll back
+- **instructions**: Prompts, skills, agent roles, AGENTS.md or CLAUDE.md, runbooks: text an agent or person follows
 
 If the risk map shows a concern no specialist covers (billing math, a specific flag rollout, an ML pipeline), fill in `references/adhoc-specialist.md` as `jobs/<job>-role.md` and launch it on `senior`.
 
@@ -134,12 +136,13 @@ A specialist is finished when its `findings/<job>/_done.md` exists. Read each on
 
 ## 6. Verify
 
-Every finding is verified. The user should only see findings that survived an attempt to reproduce them.
+Every finding is verified: proved by a test, a run, or a checked fact, or kept as plausible with a judgment record the user can audit when nothing can run. The user sees only findings that survived.
 
 1. `python3 SKILL_DIR/scripts/merge_findings.py merge ROUND_DIR --review-tree REVIEW_TREE --worktree-base WORKTREE_BASE`. It clusters overlapping findings and writes one verifier job per batch as `ROUND_DIR/jobs/verify-<n>.md`, skipping findings that already have a verdict and numbering after existing jobs. It refuses while a specialist has no `_done.md` or a finding is malformed, naming the file: relaunch that agent to finish or fix it.
 2. For each new verifier job, create its scratch worktree: `git worktree add --detach WORKTREE_BASE/verify-<n> <head-sha>`.
 3. Launch all new verifiers in parallel on `senior`, each with the prompt `You are a code review verifier. Read your job file at ROUND_DIR/jobs/verify-<n>.md and follow it.`
 4. `python3 SKILL_DIR/scripts/merge_findings.py final ROUND_DIR` writes `final.md`: kept findings (confirmed and plausible) sorted by severity, alternative directions from kept findings, dropped findings with their reasons, and any finding no verifier reached. If it lists unverified findings or refuses a verdict, delete the refused verdict files, then repeat from 1: merge writes jobs only for what still lacks a verdict.
+5. **Root causes**, once per round: read the kept findings and the `class:` lines in their verdicts' notes. When one decision in this change explains several of them, write `ROUND_DIR/findings/root-cause/<n>.md` with `kind: design`, `symptoms:` listing their ids, and the decision under `## Claim`, then `findings/root-cause/_done.md`, and repeat from 1 so a verifier checks it. Skip it when no shared decision shows.
 
 ## 7. Write the review
 
@@ -153,12 +156,14 @@ Write `ROUND_DIR/review.md` from `final.md` and the files it points at, and show
 
 ## Critical (then High, Medium, Low; omit empty sections)
 
-### <title> -- `path:start-end` · confirmed | plausible
+### <title> -- `path:start-end` · confirmed (<proof>) | plausible (<proof>)
 
 <what's wrong and its impact, 1–3 sentences>
-**Evidence:** <reproduction, or for plausible: the traced path and what couldn't be executed>
+**Evidence:** <the reproduction or checked fact; for plausible, the judgment record's path and what settles it>
 **Fix:** <the smallest fix>
 **Regression test:** <the verifier's regression test, when present>
+
+A root cause takes the same heading and adds, under its Fix, `Fixing the symptoms alone leaves this open.` and its symptoms as a list: `- <title> -- path · <status> (<proof>): <one line>. Fix: <the smallest fix>`.
 
 ## Related open PRs
 
@@ -166,18 +171,18 @@ Write `ROUND_DIR/review.md` from `final.md` and the files it points at, and show
 
 ## Alternative directions
 
-Broader changes worth considering. They don't affect the verdict.
+Broader changes to code this change didn't write. They don't affect the verdict.
 
 - **<title>** (from <finding title>): <the direction, 1–3 sentences>
 
 ---
 
-Reviewed for: <concerns covered>. <N> findings dropped in verification (<refuted>, <unproven>, <duplicates>); reasons in ROUND_DIR/final.md.
+Reviewed for: <concerns covered>. <N> findings dropped in verification (<refuted>, <unproven>, <duplicates>); reasons in ROUND_DIR/final.md. Dropped as unproven at critical or high: <titles, or none>.
 ```
 
-The verdict follows the kept findings: any confirmed critical or high means changes requested; for a plausible critical or high, decide from its traced path and say which way you went in the reason. Otherwise approve with suggestions when anything is kept, and approve when nothing is.
+The verdict follows the kept findings, design findings included: any confirmed critical or high means changes requested; for a plausible critical or high, decide from its traced path and say which way you went in the reason. Otherwise approve with suggestions when anything is kept, and approve when nothing is.
 
-Write in one voice; don't attribute findings to specialists. Merge findings that turn out to be the same root cause. Omit the related PRs and alternatives sections when empty.
+Write in one voice; don't attribute findings to specialists. A finding listed in a root cause's `symptoms` appears only nested under it. Omit the related PRs and alternatives sections when empty.
 
 Post to the PR only when the user asks (asking up front counts as confirmation). Summary comment: `gh pr comment <n> --body-file ROUND_DIR/review.md`. Inline: one PR review via `gh api repos/{owner}/{repo}/pulls/<n>/reviews` with a `comments` array, so it lands as a single review. Never approve or request changes on the PR unless asked.
 
@@ -185,8 +190,8 @@ Post to the PR only when the user asks (asking up front counts as confirmation).
 
 Only with `--auto-fix`, and only from round 1. Fixers commit on top of the reviewed head in round 1's `REVIEW_TREE`, pinned by `FIXES_REF`; nothing is pushed until the user says so.
 
-1. **Ask once, up front.** In one question, put each alternative in `final.md` (take it instead of the fix, fix the finding the quick way, or leave the finding open) and each environment need named in a plausible verdict's evidence. Skip it when there are neither.
-2. **Junior pass.** List the confirmed findings whose verdict has a `## Regression test` and whose alternative the user didn't take. If there are any, write `ROUND_DIR/jobs/fixer-junior.md` and launch a `junior` with `You are a code fixer. Read your job file at ROUND_DIR/jobs/fixer-junior.md and follow it.`
+1. **Ask once, up front.** In one question, put each alternative in `final.md` (take it instead of the fix, fix the finding the quick way, or leave the finding open) and each environment need named under a plausible verdict's `Blocked by`. Skip it when there are neither.
+2. **Junior pass.** List the confirmed findings whose verdict has a `## Regression test` and `fix_check: pass`, and whose alternative the user didn't take. If there are any, write `ROUND_DIR/jobs/fixer-junior.md` and launch a `junior` with `You are a code fixer. Read your job file at ROUND_DIR/jobs/fixer-junior.md and follow it.`
 3. **Senior pass.** List every other kept finding the user didn't leave open, plus the junior's `handed off` items. If there are any, write `ROUND_DIR/jobs/fixer-senior.md` with the alternatives the user took and their answers from 1, and launch a `senior` with the same prompt pointing at it.
 4. **Ask about what's open.** Bring every `needs impact decision`, `blocked`, and `deferred` item in `ROUND_DIR/fixes.md` to the user in one question, using the ask each item ends with.
 5. **Senior pass 2.** Send the fixer the answers, or if your harness can't resume it, launch a new one on `ROUND_DIR/jobs/fixer-senior-2.md` with the open findings and the answers. This is the last pass: whatever is still open goes in the review as a named blocker.

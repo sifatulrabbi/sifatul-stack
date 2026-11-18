@@ -10,7 +10,7 @@ Every fixer follows this. Your job file has all the paths; reread it whenever yo
 
 ## Each fix
 
-- Use a TDD skill if one is available. Otherwise work red to green: add the regression test (the one under `## Regression test` in the finding's verdict file, at its `regression_test_target`, or one you write), run it and see it fail, apply the fix, see it pass, then run the suite.
+- Prove the fix the way the verdict proved the finding. When the verdict has a `## Regression test`, work red to green with it, through a TDD skill if one is available: add it at `regression_test_target`, see it fail, apply the fix, see it pass, then run the suite. Otherwise rerun the reproduction from the verdict's `## Evidence`, see it pass after the fix, then run the suite. Add a test of your own only when it passes the regression-test gate in the format reference.
 - Commit each finding on its own with a conventional commit message, such as `fix(api): check ownership before PATCH /users/:id`, and no attribution lines. Then run `git update-ref <Pin> HEAD` so the commit survives cleanup.
 - To abandon an attempt, `git reset --hard` and `git clean -fd` in your checkout, back to your last commit.
 

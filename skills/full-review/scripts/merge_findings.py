@@ -14,6 +14,10 @@ import sys
 SKILL_DIR = pathlib.Path(__file__).resolve().parent.parent
 SEV = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 STATUSES = ("confirmed", "plausible", "refuted", "unproven", "duplicate")
+KEPT = ("confirmed", "plausible")
+KINDS = ("behavior", "scenario", "test-gap", "design", "instructions")
+PROOFS = ("test", "run", "fact", "trace")
+UNKINDED = "related-prs"
 
 
 class Malformed(Exception):
@@ -72,6 +76,9 @@ def load_findings(round_dir):
                 continue
             if meta.get("severity") not in SEV:
                 errors.append(f"{rel}: severity must be one of {', '.join(SEV)}")
+                continue
+            if job_dir.name != UNKINDED and meta.get("kind") not in KINDS:
+                errors.append(f"{rel}: kind must be one of {', '.join(KINDS)}")
                 continue
             if not title:
                 errors.append(f"{rel}: no '# ' title")
@@ -179,10 +186,13 @@ def verdict_of(round_dir, f):
     meta, _, sections = read_md(path)
     if meta.get("status") not in STATUSES:
         raise Malformed(f"status must be one of {', '.join(STATUSES)}")
+    if meta["status"] in KEPT and meta.get("proof") not in PROOFS:
+        raise Malformed(f"proof must be one of {', '.join(PROOFS)} on a {meta['status']} verdict")
     evidence = sections.get("Evidence", "")
     return {
         "path": path,
-        "status": meta.get("status", ""),
+        "status": meta["status"],
+        "proof": meta.get("proof", ""),
         "severity": meta.get("severity") if meta.get("severity") in SEV else f["severity"],
         "duplicate_of": meta.get("duplicate_of", ""),
         "alternative": meta.get("alternative", ""),
@@ -208,7 +218,7 @@ def final(round_dir):
     for c in clusters:
         for f in c["members"]:
             v = verdicts[f["id"]]
-            if v and v["status"] in ("confirmed", "plausible"):
+            if v and v["status"] in KEPT:
                 kept.append((f, v))
             elif not v:
                 unverified.append(f)
@@ -230,7 +240,7 @@ def final(round_dir):
     ]
     for f, v in kept:
         out.append(
-            f"- {v['severity']}, {v['status']}: {f['title']} ({location(f['file'], f['lines'])}), "
+            f"- {v['severity']}, {v['status']} ({v['proof']}): {f['title']} ({location(f['file'], f['lines'])}), "
             f"{f['path'].relative_to(round_dir)}, {v['path'].relative_to(round_dir)}"
         )
     alternatives = [(f, f["sections"]["Alternative"]) for f, v in kept if f["sections"].get("Alternative") and v["alternative"] != "drop"]

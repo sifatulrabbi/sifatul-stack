@@ -9,7 +9,7 @@ SCRIPT = pathlib.Path(__file__).with_name("merge_findings.py")
 SKILL_DIR = SCRIPT.parent.parent
 
 
-def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134", severity: str | None = "high", title="PATCH has no ownership check", extra=""):
+def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134", severity: str | None = "high", kind: str | None = "behavior", title="PATCH has no ownership check", extra=""):
     head = ["---"]
     if file is not None:
         head.append(f"file: {file}")
@@ -17,6 +17,8 @@ def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134"
         head.append(f"lines: {lines}")
     if severity is not None:
         head.append(f"severity: {severity}")
+    if kind is not None:
+        head.append(f"kind: {kind}")
     head.append("---")
     body = textwrap.dedent(
         f"""
@@ -35,8 +37,9 @@ def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134"
     return "\n".join(head) + "\n" + body + extra
 
 
-def verdict(status="confirmed", severity="high", evidence="Test went red.", extra_meta="", extra=""):
-    meta = f"---\nstatus: {status}\nseverity: {severity}\n{extra_meta}---\n"
+def verdict(status="confirmed", severity="high", proof="test", evidence="Test went red.", extra_meta="", extra=""):
+    proof_line = f"proof: {proof}\n" if proof else ""
+    meta = f"---\nstatus: {status}\nseverity: {severity}\n{proof_line}{extra_meta}---\n"
     return meta + f"\n## Evidence\n{evidence}\n" + extra
 
 
@@ -188,7 +191,7 @@ class FinalTest(RoundTest):
 
         self.assertEqual(res.returncode, 0, res.stderr)
         final = self.r.final()
-        self.assertIn("- critical, confirmed: Lost write (b.ts:120-134), findings/correctness/1.md, verified/correctness-1.md\n", final)
+        self.assertIn("- critical, confirmed (test): Lost write (b.ts:120-134), findings/correctness/1.md, verified/correctness-1.md\n", final)
         self.assertLess(final.index("Lost write"), final.index("Weak check"))
 
 
@@ -254,6 +257,46 @@ class FinalTest(RoundTest):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("verified/security-1.md: status", res.stderr)
         self.assertFalse((self.r.dir / "final.md").exists())
+
+    def test_refuses_a_kept_verdict_that_does_not_say_how_it_was_proved(self):
+        self.r.add("security", 1, finding())
+        self.r.done("security")
+        self.r.verify("security-1", verdict(status="plausible", proof=None))
+
+        res = self.r.run("final")
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("verified/security-1.md: proof", res.stderr)
+
+    def test_dropped_verdicts_need_no_proof(self):
+        self.r.add("security", 1, finding())
+        self.r.done("security")
+        self.r.verify("security-1", verdict(status="refuted", proof=None))
+
+        res = self.r.run("final")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+
+class KindTest(RoundTest):
+    def test_refuses_a_finding_without_a_known_kind(self):
+        self.r.add("correctness", 1, finding(kind=None))
+        self.r.add("correctness", 2, finding(kind="bug"))
+        self.r.done("correctness")
+
+        res = self.r.run("merge")
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("findings/correctness/1.md: kind", res.stderr)
+        self.assertIn("findings/correctness/2.md: kind", res.stderr)
+
+    def test_related_pr_findings_carry_no_kind(self):
+        self.r.add("related-prs", 1, finding(kind=None))
+        self.r.done("related-prs")
+
+        res = self.r.run("merge")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
 
 
 if __name__ == "__main__":

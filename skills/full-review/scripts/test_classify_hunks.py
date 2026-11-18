@@ -90,6 +90,24 @@ class ClassifyHunksTest(unittest.TestCase):
         self.assertIn("### comment\n\n- util.py: 1 · 1\n", hunks)
         self.assertIn("### rename\n\n- old.py → new.py\n", hunks)
 
+    def test_instructions_agents_read_are_semantic_and_plain_docs_are_not(self):
+        prose = "# Title\n\nDo the thing.\n"
+        paths = ["skills/review/SKILL.md", "agents/verifier.md", "AGENTS.md", ".claude/commands/ship.md", "README.md"]
+        for path in paths:
+            self.repo.write(path, prose)
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        for path in paths:
+            self.repo.write(path, "# Renamed title\n\nDo the other thing.\n")
+        self.repo.commit()
+
+        hunks = self.repo.hunks()
+
+        semantic, mechanical = hunks.split("## Mechanical")
+        for path in paths[:-1]:
+            self.assertIn(f"| {path} |", semantic)
+        self.assertIn("### docs\n\n- README.md", mechanical)
+
 
 if __name__ == "__main__":
     unittest.main()
