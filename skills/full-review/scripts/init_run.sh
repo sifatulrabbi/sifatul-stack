@@ -10,7 +10,7 @@ mkdir -p "$TARGET_DIR"
 
 last=0
 prev=""
-for dir in "$TARGET_DIR"/round-*/; do
+for dir in "$TARGET_DIR"/round-*/ "$WORKTREES_DIR"/round-*/; do
   [ -d "$dir" ] || continue
   n="${dir%/}"
   n="${n##*/round-}"
@@ -37,10 +37,11 @@ wt_base="$WORKTREES_DIR/round-$round"
 review_tree="$wt_base/review"
 if [ ! -d "$review_tree" ]; then
   mkdir -p "$wt_base"
-  git worktree add --detach "$review_tree" "$head" >/dev/null 2>&1
+  git worktree prune
+  git worktree add -q --detach "$review_tree" "$head"
 fi
 if ! git -C "$review_tree" merge-base --is-ancestor "$head" HEAD; then
-  echo "review tree $review_tree is not at $head; run cleanup_run.sh $1 first" >&2
+  echo "review tree $review_tree is not at $head; if $FIXES_REF exists it pins unpushed fixes, so push or discard them before running cleanup_run.sh $1" >&2
   exit 1
 fi
 

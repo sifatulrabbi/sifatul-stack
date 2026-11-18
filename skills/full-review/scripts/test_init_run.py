@@ -21,7 +21,7 @@ class Repo:
     def __init__(self, test, path):
         self.test = test
         self.path = path
-        self.env = ENV
+        self.env = {**ENV, "TMPDIR": str(test.tmp)}
 
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.path, env=ENV, check=True, capture_output=True, text=True).stdout.strip()
@@ -44,11 +44,7 @@ class Repo:
     def sh(self, script, *args):
         res = self.run(script, *args)
         assert res.returncode == 0, res.stderr
-        out = dict(line.split("=", 1) for line in res.stdout.splitlines() if "=" in line)
-        if script == "init_run.sh":
-            self.test.addCleanup(shutil.rmtree, pathlib.Path(out["ROUND_DIR"]).parents[2], True)
-            self.test.addCleanup(self.run, "cleanup_run.sh", args[0])
-        return out
+        return dict(line.split("=", 1) for line in res.stdout.splitlines() if "=" in line)
 
 
 class InitRunTest(unittest.TestCase):
@@ -95,15 +91,56 @@ class InitRunTest(unittest.TestCase):
 
         self.assertEqual(resumed["REVIEW_TREE"], out["REVIEW_TREE"])
 
-    def test_refuses_a_review_tree_left_at_another_head(self):
-        out = self.repo.sh("init_run.sh", "pr/7", self.first)
-        shutil.rmtree(out["ROUND_DIR"])
-        other_head = self.repo.commit("b")
+    def test_refuses_to_resume_a_review_tree_moved_off_its_head(self):
+        second = self.repo.commit("b")
+        out = self.repo.sh("init_run.sh", "pr/7", second)
+        Repo(self, pathlib.Path(out["REVIEW_TREE"])).git("checkout", "-q", "--detach", self.first)
 
-        res = self.repo.run("init_run.sh", "pr/7", other_head)
+        res = self.repo.run("init_run.sh", "pr/7", second)
 
         self.assertNotEqual(res.returncode, 0)
+        self.assertIn(out["FIXES_REF"], res.stderr)
+
+    def test_a_deleted_round_dir_starts_a_fresh_round_beside_the_old_tree(self):
+        out = self.repo.sh("init_run.sh", "pr/7", self.first)
+        shutil.rmtree(out["ROUND_DIR"])
+
+        fresh = self.repo.sh("init_run.sh", "pr/7", self.repo.commit("b"))
+
+        self.assertEqual((pathlib.Path(fresh["REVIEW_TREE"]) / "f.txt").read_text(), "b")
         self.assertEqual((pathlib.Path(out["REVIEW_TREE"]) / "f.txt").read_text(), "a")
+
+    def test_a_planning_dir_created_later_keeps_the_fixes_and_reviews_the_new_push(self):
+        repo = self.make_repo("plain", planning=False)
+        first = repo.sh("init_run.sh", "pr/1", repo.commit("a"))
+        fix = Repo(self, pathlib.Path(first["REVIEW_TREE"])).commit("fixed")
+        repo.git("update-ref", first["FIXES_REF"], fix)
+        self.finish(first["ROUND_DIR"])
+        (repo.path / ".planning").mkdir()
+
+        out = repo.sh("init_run.sh", "pr/1", repo.commit("b"))
+
+        self.assertEqual((pathlib.Path(out["REVIEW_TREE"]) / "f.txt").read_text(), "b")
+        self.assertEqual(repo.git("rev-parse", first["FIXES_REF"]), fix)
+
+    def test_a_planning_dir_created_later_never_reuses_a_fixed_review_tree(self):
+        repo = self.make_repo("plain", planning=False)
+        head = repo.commit("a")
+        first = repo.sh("init_run.sh", "pr/1", head)
+        Repo(self, pathlib.Path(first["REVIEW_TREE"])).commit("fixed")
+        (repo.path / ".planning").mkdir()
+
+        out = repo.sh("init_run.sh", "pr/1", head)
+
+        self.assertEqual((pathlib.Path(out["REVIEW_TREE"]) / "f.txt").read_text(), "a")
+
+    def test_resumes_after_the_review_tree_files_were_deleted(self):
+        out = self.repo.sh("init_run.sh", "pr/7", self.first)
+        shutil.rmtree(out["REVIEW_TREE"])
+
+        resumed = self.repo.sh("init_run.sh", "pr/7", self.first)
+
+        self.assertEqual((pathlib.Path(resumed["REVIEW_TREE"]) / "f.txt").read_text(), "a")
 
     def test_new_push_after_a_finished_round_starts_the_next_round(self):
         first = self.repo.sh("init_run.sh", "pr/7", self.first)
@@ -185,9 +222,9 @@ class InitRunTest(unittest.TestCase):
                     self.assertNotEqual(first[key], second[key])
 
     def test_cleanup_in_one_worktree_keeps_the_others_fixes(self):
-        main = self.make_repo("main", planning=False)
+        main = self.make_repo("a/app", planning=False)
         head = main.commit("a")
-        other = main.worktree(self.tmp / "other", planning=False)
+        other = main.worktree(self.tmp / "b/app", planning=False)
         fixes = main.sh("init_run.sh", "pr/8", head)["FIXES_REF"]
         other.sh("init_run.sh", "pr/8", head)
         main.git("update-ref", fixes, head)
@@ -206,6 +243,19 @@ class InitRunTest(unittest.TestCase):
 
         self.assertTrue(out["ROUND_DIR"].startswith(f"{root}/full-review/"))
         self.assertTrue(out["REVIEW_TREE"].startswith(f"{root}/full-review-worktrees/"))
+
+    def test_cleanup_under_another_temp_dir_still_removes_the_review_trees(self):
+        repo = self.make_repo("plain", planning=False)
+        out = repo.sh("init_run.sh", "pr/1", repo.commit("a"))
+        repo.env = {**ENV, "TMPDIR": str(self.tmp / "other")}
+
+        repo.sh("cleanup_run.sh", "pr/1")
+
+        self.assertFalse(pathlib.Path(out["REVIEW_TREE"]).exists())
+        self.assertNotIn("full-review-worktrees", repo.git("worktree", "list"))
+
+    def test_runs_leave_nothing_in_the_real_temp_dir(self):
+        self.assertTrue(self.repo.sh("init_run.sh", "pr/1", self.first)["REVIEW_TREE"].startswith(f"{self.tmp}/"))
 
     def test_a_space_in_the_checkout_name_becomes_a_dash(self):
         repo = self.make_repo("my app", planning=False)

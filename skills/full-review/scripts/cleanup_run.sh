@@ -11,6 +11,15 @@ if [ -d "$WORKTREES_DIR" ]; then
   rm -rf "$WORKTREES_DIR"
   rmdir "${WORKTREES_DIR%/*}" "${WORKTREES_DIR%/*/*}" 2>/dev/null || true
 fi
+git worktree list --porcelain -z | while IFS= read -r -d '' line; do
+  wt="${line#worktree }"
+  case "$wt" in
+  *"/full-review-worktrees/$REPO_KEY/$TARGET_KEY/round-"*/*)
+    git worktree remove --force "$wt" 2>/dev/null || true
+    rmdir "${wt%/*}" 2>/dev/null || true
+    ;;
+  esac
+done
 git worktree prune
 git show-ref --verify --quiet "$FIXES_REF" && git update-ref -d "$FIXES_REF"
 echo "Removed worktrees for $1"
