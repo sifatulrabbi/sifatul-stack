@@ -54,7 +54,7 @@ GENERATED_MARKER = re.compile(r"@generated|DO NOT EDIT|auto-?generated", re.I)
 DOC_EXTS = (".md", ".mdx", ".rst", ".txt", ".adoc")
 INSTRUCTION_NAMES = ["SKILL.md", "*AGENTS*.md", "CLAUDE*.md", "GEMINI*.md", "copilot-instructions.md", ".cursorrules", ".windsurfrules", ".clinerules"]
 INSTRUCTION_DIRS = {"skills", "agents", "prompts", "instructions", "commands", ".claude", ".codex", ".opencode", ".agents", ".cursor", ".windsurf", ".gemini", ".clinerules"}
-PROMPT_EXTS = DOC_EXTS + (".toml", ".yaml", ".yml")
+PROMPT_EXTS = DOC_EXTS + (".mdc", ".toml", ".yaml", ".yml")
 COMMENT = re.compile(r"^\s*(//|/\*|\*|\*/|#|--|<!--|-->)")
 NOT_COMMENT = re.compile(
     r"^\s*#\s*(include|define|undef|if|ifdef|ifndef|elif|else|endif|pragma|import|!)"
@@ -131,7 +131,8 @@ def is_instructions(path):
     *dirs, name = path.split("/")
     if any(fnmatch.fnmatch(name, n) for n in INSTRUCTION_NAMES):
         return True
-    return name.lower().endswith(PROMPT_EXTS) and any(d in INSTRUCTION_DIRS for d in dirs)
+    prompt_like = name.lower().endswith(PROMPT_EXTS) or "." not in name.lstrip(".")
+    return prompt_like and any(d in INSTRUCTION_DIRS for d in dirs)
 
 
 def file_kind(f, head):

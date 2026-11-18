@@ -92,7 +92,7 @@ class ClassifyHunksTest(unittest.TestCase):
 
     def test_instructions_agents_read_are_semantic_and_plain_docs_are_not(self):
         prose = "# Title\n\nDo the thing.\n"
-        paths = ["skills/review/SKILL.md", "agents/verifier.md", "AGENTS.md", ".claude/commands/ship.md", "GEMINI.md", ".github/copilot-instructions.md", ".cursorrules", "README.md"]
+        paths = ["skills/review/SKILL.md", "agents/verifier.md", "AGENTS.md", ".claude/commands/ship.md", "GEMINI.md", ".github/copilot-instructions.md", ".cursorrules", ".gemini/commands/review.toml", "AGENTS.override.md", "README.md"]
         for path in paths:
             self.repo.write(path, prose)
         self.repo.commit()
@@ -125,6 +125,29 @@ class ClassifyHunksTest(unittest.TestCase):
         self.repo.commit()
 
         self.assertIn("| skills/x/SKILL.md |", self.repo.hunks().split("## Mechanical")[0])
+
+    def test_reindenting_an_instruction_file_is_whitespace(self):
+        self.repo.write("skills/y/SKILL.md", "Check it.\n")
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        self.repo.write("skills/y/SKILL.md", "  Check  it.\n")
+        self.repo.commit()
+
+        self.assertIn("skills/y/SKILL.md", self.repo.hunks().split("## Mechanical")[1])
+
+    def test_cursor_rules_and_extensionless_prompts_are_semantic(self):
+        paths = [".cursor/rules/style.mdc", "prompts/system"]
+        for path in paths:
+            self.repo.write(path, "# Never use any\n")
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        for path in paths:
+            self.repo.write(path, "# Always use any\n")
+        self.repo.commit()
+
+        semantic = self.repo.hunks().split("## Mechanical")[0]
+        for path in paths:
+            self.assertIn(f"| {path} |", semantic)
 
 
 if __name__ == "__main__":
