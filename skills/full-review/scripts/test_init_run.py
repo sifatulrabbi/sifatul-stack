@@ -114,6 +114,13 @@ class InitRunTest(unittest.TestCase):
 
         self.assertTrue((pathlib.Path(nested["REVIEW_TREE"]) / "f.txt").exists())
 
+    def test_an_escaped_slash_never_collides_with_a_literal_one(self):
+        slashed = self.repo.sh("init_run.sh", "branch/a/b", self.first)
+        literal = self.repo.sh("init_run.sh", "branch/a%2Fb", self.first)
+
+        self.assertNotEqual(slashed["ROUND_DIR"], literal["ROUND_DIR"])
+        self.assertNotEqual(slashed["FIXES_REF"], literal["FIXES_REF"])
+
     def test_repos_with_the_same_name_never_share_rounds_or_trees(self):
         one = self.make_repo("one/app", planning=False)
         two = self.make_repo("two/app", planning=False)
