@@ -27,7 +27,7 @@ Identify base and head without changing the user's checkout:
 
 - **GitHub PR:** `gh pr view <n> --json number,title,body,url,baseRefName,headRefName,headRefOid`, then `git fetch origin <baseRefName> pull/<n>/head`. Target: `pr/<n>`.
 - **Local branch:** base is the default branch, head is the branch tip. Target: `branch/<name>`.
-- **Uncommitted work:** head is `git stash create` (a commit of the working tree that leaves it untouched; fall back to `HEAD` if empty). Untracked files aren't included; ask the user to stage them if they should be reviewed. Target: `wip/<branch>`.
+- **Uncommitted work:** head is `git stash create` (a commit of the working tree that leaves it untouched; fall back to `HEAD` if empty). Untracked files aren't included; ask the user to stage them if they should be reviewed. Target: `wip/<branch>`, or `wip/HEAD` on a detached HEAD.
 
 Run `SKILL_DIR/scripts/init_run.sh <target> <head-sha>` from the repo root. Rounds, worktrees, and `FIXES_REF` are keyed by checkout and target, so reviews from different clones, worktrees, or targets never share them. Each review of a target is a round; the script resumes an unfinished round at the same head, or starts the next one. It prints:
 
