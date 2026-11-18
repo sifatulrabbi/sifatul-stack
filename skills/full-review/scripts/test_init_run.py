@@ -207,6 +207,19 @@ class InitRunTest(unittest.TestCase):
         self.assertTrue(out["ROUND_DIR"].startswith(f"{root}/full-review/"))
         self.assertTrue(out["REVIEW_TREE"].startswith(f"{root}/full-review-worktrees/"))
 
+    def test_a_space_in_the_checkout_name_becomes_a_dash(self):
+        repo = self.make_repo("my app", planning=False)
+        head = repo.commit("a")
+
+        out = repo.sh("init_run.sh", "pr/1", head)
+        repo.git("check-ref-format", out["FIXES_REF"])
+        repo.git("update-ref", out["FIXES_REF"], head)
+        repo.sh("cleanup_run.sh", "pr/1")
+
+        self.assertIn("/my-app-", out["REVIEW_TREE"])
+        self.assertEqual(repo.git("for-each-ref", "refs/full-review/"), "")
+        self.assertFalse(pathlib.Path(out["REVIEW_TREE"]).exists())
+
     def test_refuses_a_target_without_a_kind_and_a_name(self):
         for target in ["pr7", "pr", "pr/", "x/1"]:
             with self.subTest(target=target):
