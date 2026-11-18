@@ -183,6 +183,18 @@ class InitRunTest(unittest.TestCase):
                 for key in ["ROUND_DIR", "REVIEW_TREE", "FIXES_REF"]:
                     self.assertNotEqual(first[key], second[key])
 
+    def test_cleanup_in_one_worktree_keeps_the_others_fixes(self):
+        main = self.make_repo("main", planning=False)
+        head = main.commit("a")
+        other = main.worktree(self.tmp / "other", planning=False)
+        fixes = main.sh("init_run.sh", "pr/8", head)["FIXES_REF"]
+        other.sh("init_run.sh", "pr/8", head)
+        main.git("update-ref", fixes, head)
+
+        other.sh("cleanup_run.sh", "pr/8")
+
+        self.assertEqual(main.git("rev-parse", fixes), head)
+
     def test_refuses_a_target_without_a_kind_and_a_name(self):
         for target in ["pr7", "pr", "pr/", "x/1"]:
             with self.subTest(target=target):
