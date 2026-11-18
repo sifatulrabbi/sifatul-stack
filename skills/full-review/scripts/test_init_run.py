@@ -106,6 +106,14 @@ class InitRunTest(unittest.TestCase):
         self.assertNotEqual(slashed["REVIEW_TREE"], dashed["REVIEW_TREE"])
         self.assertNotEqual(slashed["FIXES_REF"], dashed["FIXES_REF"])
 
+    def test_cleaning_a_branch_leaves_its_nested_branch_alone(self):
+        nested = self.repo.sh("init_run.sh", "branch/a/b", self.first)
+        self.repo.sh("init_run.sh", "branch/a", self.first)
+
+        self.repo.sh("cleanup_run.sh", "branch/a")
+
+        self.assertTrue((pathlib.Path(nested["REVIEW_TREE"]) / "f.txt").exists())
+
     def test_repos_with_the_same_name_never_share_rounds_or_trees(self):
         one = self.make_repo("one/app", planning=False)
         two = self.make_repo("two/app", planning=False)
