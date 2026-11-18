@@ -188,6 +188,10 @@ def verdict_of(round_dir, f):
         raise Malformed(f"status must be one of {', '.join(STATUSES)}")
     if meta["status"] in KEPT and meta.get("proof") not in PROOFS:
         raise Malformed(f"proof must be one of {', '.join(PROOFS)} on a {meta['status']} verdict")
+    if meta["status"] == "confirmed" and meta["proof"] == "trace":
+        raise Malformed("proof: trace cannot back a confirmed verdict")
+    if meta["status"] == "plausible" and "Judgment" not in sections:
+        raise Malformed("a plausible verdict needs a Judgment section")
     evidence = sections.get("Evidence", "")
     return {
         "path": path,
