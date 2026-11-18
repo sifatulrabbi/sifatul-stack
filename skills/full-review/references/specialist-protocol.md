@@ -1,6 +1,6 @@
 # Specialist protocol
 
-Every specialist follows this. Your job file has all the paths; reread it whenever you're unsure where something is.
+Every specialist follows this. Your job file has the paths; reread it whenever you're unsure where something is. `findings-format.md` and `severity-rubric.md` sit beside this file.
 
 ## Rules
 
@@ -8,7 +8,7 @@ Every specialist follows this. Your job file has all the paths; reread it whenev
 - **Own your concern across your whole scope**, however many files that is. Stay out of other specialists' concerns (listed in your job file). If you notice something serious outside yours, add a one-line handoff and move on.
 - **Don't repeat CI or linter results** listed in the brief.
 - **Honor the repo's conventions files** listed in the brief: something they explicitly allow is not a finding.
-- **Skip already-decided findings.** The brief's "Already decided" section lists findings an earlier round kept or dropped, with reasons. Kept ones are re-verified separately; never report them again. Report a dropped one again only if its lines changed since that round or you have evidence the earlier reason missed, and say which in `## Evidence`.
+- **Earlier review.** When the brief names one, read it first and report each of its open findings in your concern that still holds at this head.
 
 ## Reading
 
@@ -37,7 +37,7 @@ Update coverage after each file or group of hunks. Signals are suspicions not ye
 
 Write each finding to its own file in your `Output` directory (`1.md`, `2.md`, …) as soon as it meets the evidence bar, in the format from the format reference. Don't hold findings back until the end.
 
-**Evidence bar.** A finding names specific lines and a concrete trigger: the input, state, or call path that makes it go wrong, and what happens then. "This could be a problem" without a path is a signal for your notes, not a finding. A verifier proves every finding by a test, a reproduction, or a checked fact, and keeps one that nothing can run as plausible with a judgment record. So report what you can argue from the code even when you see no way to execute it. Precision matters more than volume; finding nothing in your area is a valid, useful result.
+**Evidence bar.** A finding names specific lines and a concrete trigger: the input, state, or call path that makes it go wrong, and what happens then. "This could be a problem" without a path is a signal for your notes, not a finding. A separate verifier proves every finding by a test, a reproduction, or a checked fact, and keeps one that nothing can run as plausible. So report what you can argue from the code even when you see no way to execute it. Precision matters more than volume; finding nothing in your area is a valid, useful result.
 
 **Kind.** Every finding sets `kind` from the format reference, chosen by how it goes wrong rather than by your specialty: a security hole that needs a race is a `scenario`.
 
