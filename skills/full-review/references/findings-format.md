@@ -92,7 +92,7 @@ it("rejects PATCH on another user", async () => {
 
 - `status`: `confirmed` | `plausible` | `unproven` | `refuted` | `duplicate`. Only confirmed and plausible reach the user.
 - `proof` (confirmed and plausible): `test` | `run` | `fact` | `trace`, as defined in the verifier role.
-- `fix_check`: `pass` when the finding's `## Fix` turned the reproduction green, `fail` when it didn't; omit without a reproduction.
+- `fix_check`: `pass` when the finding's `## Fix` closed the failure (the reproduction went green; for a test-gap, the suite went red with the mutation and green without it), `fail` when it didn't; omit without a reproduction or when the Fix deletes or rewrites a test.
 - `severity`: the final severity; explain a change in `## Notes`.
 - `duplicate_of`: the id of the finding kept instead, when status is `duplicate`.
 - `regression_test_target`: the file the regression test belongs in, when there is one.
