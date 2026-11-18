@@ -98,7 +98,7 @@ class ClassifyHunksTest(unittest.TestCase):
         self.repo.commit()
         self.repo.git("checkout", "-q", "-b", "feature")
         for path in paths:
-            self.repo.write(path, "# Renamed title\n\nDo the other thing.\n")
+            self.repo.write(path, "# Renamed title\n\nDo the thing.\n")
         self.repo.commit()
 
         hunks = self.repo.hunks()
