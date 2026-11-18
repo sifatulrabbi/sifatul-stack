@@ -63,10 +63,10 @@ class InitRunTest(unittest.TestCase):
         (pathlib.Path(round_dir) / "review.md").write_text("# Review\n")
 
     def test_first_round_records_the_head_and_checks_it_out(self):
-        out = self.repo.sh("init_run.sh", "pr/7", self.first)
+        out = self.repo.sh("init_run.sh", "wip/main", self.first)
 
         self.assertEqual(out["ROUND"], "1")
-        self.assertEqual(out["ROUND_DIR"], f"{self.repo.path}/.planning/full-review/pr/7/round-1")
+        self.assertEqual(out["ROUND_DIR"], f"{self.repo.path}/.planning/full-review/wip/main/round-1")
         self.assertEqual(out["PREV_ROUND_DIR"], "")
         self.assertIn(f"head: {self.first}", (pathlib.Path(out["ROUND_DIR"]) / "round.md").read_text())
         self.assertEqual((pathlib.Path(out["REVIEW_TREE"]) / "f.txt").read_text(), "a")
@@ -144,11 +144,12 @@ class InitRunTest(unittest.TestCase):
 
         self.assertTrue((pathlib.Path(one_tree) / "f.txt").exists())
 
-    def test_refuses_a_target_without_its_kind(self):
-        res = self.repo.run("init_run.sh", "pr7", self.first)
+    def test_refuses_a_target_without_a_kind_and_a_name(self):
+        for target in ["pr7", "pr", "pr/", "x/1"]:
+            with self.subTest(target=target):
+                res = self.repo.run("init_run.sh", target, self.first)
 
-        self.assertNotEqual(res.returncode, 0)
-        self.assertIn("pr/<n>", res.stderr)
+                self.assertNotEqual(res.returncode, 0)
 
 
 if __name__ == "__main__":
