@@ -293,6 +293,15 @@ class FinalTest(RoundTest):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("verified/security-1.md", res.stderr)
 
+    def test_accepts_a_plausible_verdict_with_a_judgment_record(self):
+        self.r.add("security", 1, finding())
+        self.r.done("security")
+        self.r.verify("security-1", verdict(status="plausible", proof="trace", extra="\n## Judgment\nPath: a.\n"))
+
+        res = self.r.run("final")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+
     def test_dropped_verdicts_need_no_proof(self):
         self.r.add("security", 1, finding())
         self.r.done("security")
