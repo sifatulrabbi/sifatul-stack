@@ -90,6 +90,65 @@ class ClassifyHunksTest(unittest.TestCase):
         self.assertIn("### comment\n\n- util.py: 1 · 1\n", hunks)
         self.assertIn("### rename\n\n- old.py → new.py\n", hunks)
 
+    def test_instructions_agents_read_are_semantic_and_plain_docs_are_not(self):
+        prose = "# Title\n\nDo the thing.\n"
+        paths = ["skills/review/SKILL.md", "agents/verifier.md", "AGENTS.md", ".claude/commands/ship.md", "GEMINI.md", ".github/copilot-instructions.md", ".cursorrules", ".gemini/commands/review.toml", "AGENTS.override.md", "README.md"]
+        for path in paths:
+            self.repo.write(path, prose)
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        for path in paths:
+            self.repo.write(path, "# Renamed title\n\nDo the thing.\n")
+        self.repo.commit()
+
+        hunks = self.repo.hunks()
+
+        semantic, mechanical = hunks.split("## Mechanical")
+        for path in paths[:-1]:
+            self.assertIn(f"| {path} |", semantic)
+        self.assertIn("### docs\n\n- README.md", mechanical)
+
+    def test_code_under_an_instruction_dir_keeps_the_comment_label(self):
+        self.repo.write(".claude/commands/tool.py", "# old note\nx = 1\n")
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        self.repo.write(".claude/commands/tool.py", "# new note\nx = 1\n")
+        self.repo.commit()
+
+        self.assertIn("### comment\n\n- .claude/commands/tool.py: 1 · 2\n", self.repo.hunks())
+
+    def test_joining_words_in_an_instruction_file_is_semantic(self):
+        self.repo.write("skills/x/SKILL.md", "You can not skip this.\n")
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        self.repo.write("skills/x/SKILL.md", "You cannot skip this.\n")
+        self.repo.commit()
+
+        self.assertIn("| skills/x/SKILL.md |", self.repo.hunks().split("## Mechanical")[0])
+
+    def test_reindenting_an_instruction_file_is_whitespace(self):
+        self.repo.write("skills/y/SKILL.md", "Check it.\n")
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        self.repo.write("skills/y/SKILL.md", "  Check  it.\n")
+        self.repo.commit()
+
+        self.assertIn("skills/y/SKILL.md", self.repo.hunks().split("## Mechanical")[1])
+
+    def test_cursor_rules_and_extensionless_prompts_are_semantic(self):
+        paths = [".cursor/rules/style.mdc", "prompts/system"]
+        for path in paths:
+            self.repo.write(path, "# Never use any\n")
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "-b", "feature")
+        for path in paths:
+            self.repo.write(path, "# Always use any\n")
+        self.repo.commit()
+
+        semantic = self.repo.hunks().split("## Mechanical")[0]
+        for path in paths:
+            self.assertIn(f"| {path} |", semantic)
+
 
 if __name__ == "__main__":
     unittest.main()

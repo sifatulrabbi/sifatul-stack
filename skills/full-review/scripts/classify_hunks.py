@@ -4,6 +4,7 @@
 Usage: classify_hunks.py --base <ref> [--head <ref>] [-o hunks.md]
 
 Kinds: whitespace, comment, lockfile, generated, rename, docs, binary, semantic.
+Instruction files agents read (skills, agent prompts, AGENTS.md, rule files) are never docs or comments; code under their directories still is code.
 These are heuristics; the lead skims non-semantic hunks before excluding them.
 """
 
@@ -51,6 +52,9 @@ GENERATED_DIRS = [
 ]
 GENERATED_MARKER = re.compile(r"@generated|DO NOT EDIT|auto-?generated", re.I)
 DOC_EXTS = (".md", ".mdx", ".rst", ".txt", ".adoc")
+INSTRUCTION_NAMES = ["SKILL.md", "*AGENTS*.md", "CLAUDE*.md", "GEMINI*.md", "copilot-instructions.md", ".cursorrules", ".windsurfrules", ".clinerules"]
+INSTRUCTION_DIRS = {"skills", "agents", "prompts", "instructions", "commands", ".claude", ".codex", ".opencode", ".agents", ".cursor", ".windsurf", ".gemini", ".clinerules"}
+PROMPT_EXTS = DOC_EXTS + (".mdc", ".toml", ".yaml", ".yml")
 COMMENT = re.compile(r"^\s*(//|/\*|\*|\*/|#|--|<!--|-->)")
 NOT_COMMENT = re.compile(
     r"^\s*#\s*(include|define|undef|if|ifdef|ifndef|elif|else|endif|pragma|import|!)"
@@ -123,6 +127,14 @@ def is_generated(path, head):
         return False
 
 
+def is_instructions(path):
+    *dirs, name = path.split("/")
+    if any(fnmatch.fnmatch(name, n) for n in INSTRUCTION_NAMES):
+        return True
+    prompt_like = name.lower().endswith(PROMPT_EXTS) or "." not in name.lstrip(".")
+    return prompt_like and any(d in INSTRUCTION_DIRS for d in dirs)
+
+
 def file_kind(f, head):
     path = f["path"]
     if f["binary"]:
@@ -131,7 +143,7 @@ def file_kind(f, head):
         return "lockfile"
     if f["status"] == "renamed" and f["similarity"] == 100 and not f["hunks"]:
         return "rename"
-    if path.lower().endswith(DOC_EXTS):
+    if path.lower().endswith(DOC_EXTS) and not is_instructions(path):
         return "docs"
     if f["status"] != "deleted" and is_generated(path, head):
         return "generated"
@@ -142,13 +154,14 @@ def is_comment(line):
     return bool(COMMENT.match(line)) and not NOT_COMMENT.match(line)
 
 
-def hunk_kind(h):
+def hunk_kind(h, prose):
     removed = [l for l in h["removed"] if l.strip()]
     added = [l for l in h["added"] if l.strip()]
     squash = lambda ls: sorted(re.sub(r"\s+", "", l) for l in ls)
-    if squash(removed) == squash(added):
+    spaced = lambda ls: [re.sub(r"\s+", " ", l).strip() for l in ls]
+    if (spaced(removed) == spaced(added)) if prose else (squash(removed) == squash(added)):
         return "whitespace"
-    if all(is_comment(l) for l in removed + added):
+    if not prose and all(is_comment(l) for l in removed + added):
         return "comment"
     return "semantic"
 
@@ -218,7 +231,7 @@ def main():
         fk = file_kind(f, args.head)
         hunks = []
         for h in f["hunks"]:
-            kind = fk or hunk_kind(h)
+            kind = fk or hunk_kind(h, prose=is_instructions(f["path"]))
             changed = len(h["added"]) + len(h["removed"])
             hunks.append({"old": h["old"], "new": h["new"], "kind": kind, "lines": changed})
             by_kind[kind] = by_kind.get(kind, 0) + 1

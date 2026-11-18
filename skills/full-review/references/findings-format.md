@@ -11,6 +11,7 @@ One file per finding, numbered from 1, written as soon as the finding meets the 
 file: src/api/users.ts
 lines: 120-134
 severity: high
+kind: behavior
 ---
 
 # PATCH /users/:id has no ownership check
@@ -33,7 +34,14 @@ Move ownership checks into a route-level middleware so new handlers get them by 
 
 - `lines`: head-side line numbers in the code tree, `start-end` or a single line. For a PR-wide finding, leave `file` and `lines` empty.
 - `severity`: `critical`, `high`, `medium`, or `low`, from the severity rubric.
-- `## Trigger`: how to make it go wrong. The verifier starts here, so make it concrete.
+- `kind`: how it goes wrong, which decides how the verifier proves it. Related-PR findings leave it out.
+  - `behavior`: a deterministic wrong result for some input or call.
+  - `scenario`: wrong only under an ordering, timing, failure, old data, or environment.
+  - `test-gap`: a missing test, or a test that doesn't earn its keep.
+  - `design`: a decision in this change (a boundary, data shape, format, protocol, dependency) that causes or invites failures.
+  - `instructions`: text an agent or person follows (a prompt, skill, agent role, runbook) that will lead them wrong.
+- `symptoms` (root causes only): the comma-separated ids of the kept findings this design finding causes, all from the same round. Merge refuses an id that names no finding in the round or names another root cause.
+- `## Trigger`: how to make it go wrong. The verifier starts here, so make it concrete. For a scenario, specify the reproduction setup: the starting state, the ordering, timing, or fault, and how to force it.
 - `## Fix`: the smallest change that closes the gap.
 - `carried_from` (carried findings only): the previous round's verdict file for this finding, which the verifier reruns.
 - `## Alternative` (optional): the bigger root-cause direction, when the real gap deserves more than the smallest fix (a redesign, a new layer, replacing a framework). It carries no severity and reaches the review only if its finding survives verification.
@@ -63,6 +71,8 @@ One file per finding id from the job file.
 ---
 status: confirmed
 severity: high
+proof: test
+fix_check: pass
 regression_test_target: test/api/users.test.ts
 ---
 
@@ -81,12 +91,26 @@ it("rejects PATCH on another user", async () => {
 ````
 
 - `status`: `confirmed` | `plausible` | `unproven` | `refuted` | `duplicate`. Only confirmed and plausible reach the user.
+- `proof` (confirmed and plausible): `test` | `run` | `fact` | `trace`, as defined in the verifier role.
+- `fix_check`: `pass` when the finding's `## Fix` closed the failure (the reproduction went green; for a test-gap, the suite went red with the mutation and green without it), `fail` when it didn't; omit without a reproduction or when the Fix deletes or rewrites a test.
 - `severity`: the final severity; explain a change in `## Notes`.
 - `duplicate_of`: the id of the finding kept instead, when status is `duplicate`.
 - `regression_test_target`: the file the regression test belongs in, when there is one.
 - `alternative: drop`: the finding's `## Alternative` makes a false factual claim; it stays out of the review.
 - `## Evidence`: the first line is the one-line reason shown for dropped findings, so lead with the verdict's reason.
-- `## Regression test`: the test that went red on the bug or mutation, for confirmed bugs and missing tests; omit otherwise.
+- `## Judgment` (plausible only): Path, Guards searched, Blocked by, Settles it, one line each.
+- `## Regression test`: a test that went red on the bug or mutation, only when it passes the gate below; omit otherwise.
+- `## Notes`: severity changes, `fix_check: fail` reasons, and the sibling probe's `class:` line.
+
+### Regression-test gate
+
+A test earns a place in the repo, here or in a fix, when it:
+
+- checks observable behavior (an output, a state, a status), never the wording of a message, prompt, or doc;
+- is simpler than the code it guards;
+- survives a harmless refactor or rewording.
+
+Changes to prompts, skills, and docs never carry one; the only test such a change can need guards code that parses the text.
 
 ## Fix outcomes: `fixes.md`
 

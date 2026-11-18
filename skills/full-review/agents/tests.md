@@ -17,6 +17,6 @@ Bugs in the production code itself, style, coverage percentages.
 
 ## Not a finding
 
-Missing tests for trivial code. Test style. A gap already covered by another test, even an indirect one.
+Missing tests for trivial code. Test style. A gap already covered by another test, even an indirect one. A missing test for a prompt, skill, or doc change: the only test such a change can need guards code that parses it.
 
 Severity: a missing test for risky behavior is medium (high if it guards security or data integrity); every other gap and every test that doesn't earn its keep is low.

@@ -9,7 +9,7 @@ SCRIPT = pathlib.Path(__file__).with_name("merge_findings.py")
 SKILL_DIR = SCRIPT.parent.parent
 
 
-def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134", severity: str | None = "high", title="PATCH has no ownership check", extra=""):
+def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134", severity: str | None = "high", kind: str | None = "behavior", title="PATCH has no ownership check", extra="", symptoms: str | None = None):
     head = ["---"]
     if file is not None:
         head.append(f"file: {file}")
@@ -17,6 +17,10 @@ def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134"
         head.append(f"lines: {lines}")
     if severity is not None:
         head.append(f"severity: {severity}")
+    if kind is not None:
+        head.append(f"kind: {kind}")
+    if symptoms is not None:
+        head.append(f"symptoms: {symptoms}")
     head.append("---")
     body = textwrap.dedent(
         f"""
@@ -35,8 +39,9 @@ def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134"
     return "\n".join(head) + "\n" + body + extra
 
 
-def verdict(status="confirmed", severity="high", evidence="Test went red.", extra_meta="", extra=""):
-    meta = f"---\nstatus: {status}\nseverity: {severity}\n{extra_meta}---\n"
+def verdict(status="confirmed", severity="high", proof="test", evidence="Test went red.", extra_meta="", extra=""):
+    proof_line = f"proof: {proof}\n" if proof else ""
+    meta = f"---\nstatus: {status}\nseverity: {severity}\n{proof_line}{extra_meta}---\n"
     return meta + f"\n## Evidence\n{evidence}\n" + extra
 
 
@@ -188,7 +193,7 @@ class FinalTest(RoundTest):
 
         self.assertEqual(res.returncode, 0, res.stderr)
         final = self.r.final()
-        self.assertIn("- critical, confirmed: Lost write (b.ts:120-134), findings/correctness/1.md, verified/correctness-1.md\n", final)
+        self.assertIn("- critical, confirmed (test): Lost write (b.ts:120-134), findings/correctness/1.md, verified/correctness-1.md\n", final)
         self.assertLess(final.index("Lost write"), final.index("Weak check"))
 
 
@@ -254,6 +259,108 @@ class FinalTest(RoundTest):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("verified/security-1.md: status", res.stderr)
         self.assertFalse((self.r.dir / "final.md").exists())
+
+    def test_refuses_a_kept_verdict_that_does_not_say_how_it_was_proved(self):
+        self.r.add("security", 1, finding())
+        self.r.add("security", 2, finding(lines="200-210"))
+        self.r.done("security")
+        self.r.verify("security-1", verdict(status="plausible", proof=None))
+        self.r.verify("security-2", verdict(status="confirmed", proof="guess"))
+
+        res = self.r.run("final")
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("verified/security-1.md: proof", res.stderr)
+        self.assertIn("verified/security-2.md: proof", res.stderr)
+
+    def test_refuses_a_confirmed_verdict_proved_only_by_trace(self):
+        self.r.add("security", 1, finding())
+        self.r.done("security")
+        self.r.verify("security-1", verdict(status="confirmed", proof="trace"))
+
+        res = self.r.run("final")
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("verified/security-1.md: proof", res.stderr)
+
+    def test_refuses_a_plausible_verdict_without_a_judgment_record(self):
+        self.r.add("security", 1, finding())
+        self.r.done("security")
+        self.r.verify("security-1", verdict(status="plausible", proof="trace"))
+
+        res = self.r.run("final")
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("verified/security-1.md", res.stderr)
+
+    def test_accepts_a_plausible_verdict_with_a_judgment_record(self):
+        self.r.add("security", 1, finding())
+        self.r.done("security")
+        self.r.verify("security-1", verdict(status="plausible", proof="trace", extra="\n## Judgment\nPath: a.\n"))
+
+        res = self.r.run("final")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_dropped_verdicts_need_no_proof(self):
+        self.r.add("security", 1, finding())
+        self.r.done("security")
+        self.r.verify("security-1", verdict(status="refuted", proof=None))
+
+        res = self.r.run("final")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+
+class KindTest(RoundTest):
+    def test_refuses_a_finding_without_a_known_kind(self):
+        self.r.add("correctness", 1, finding(kind=None))
+        self.r.add("correctness", 2, finding(kind="bug"))
+        self.r.done("correctness")
+
+        res = self.r.run("merge")
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("findings/correctness/1.md: kind", res.stderr)
+        self.assertIn("findings/correctness/2.md: kind", res.stderr)
+
+    def test_related_pr_findings_carry_no_kind(self):
+        self.r.add("related-prs", 1, finding(kind=None))
+        self.r.done("related-prs")
+
+        res = self.r.run("merge")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+
+class SymptomsTest(RoundTest):
+    def test_accepts_symptoms_that_name_this_rounds_findings(self):
+        self.r.add("correctness", 1, finding())
+        self.r.add("correctness", 2, finding(file="src/b.ts"))
+        self.r.done("correctness")
+        self.r.add("root-cause", 1, finding(kind="design", symptoms="correctness-1, correctness-2"))
+        self.r.done("root-cause")
+
+        res = self.r.run("merge")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_refuses_symptoms_that_name_no_finding_or_a_root_cause(self):
+        self.r.add("correctness", 1, finding())
+        self.r.done("correctness")
+        self.r.add("root-cause", 1, finding(kind="design", symptoms="correctness-1, correctness-9"))
+        self.r.add("carried", 1, finding(kind="design", symptoms="root-cause-1"))
+        self.r.done("root-cause")
+        self.r.done("carried")
+
+        res = self.r.run("merge")
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("findings/root-cause/1.md: symptoms", res.stderr)
+        self.assertIn("correctness-9", res.stderr)
+        self.assertNotIn("correctness-1,", res.stderr)
+        self.assertIn("findings/carried/1.md: symptoms", res.stderr)
+        self.assertEqual(self.r.jobs(), [])
 
 
 if __name__ == "__main__":

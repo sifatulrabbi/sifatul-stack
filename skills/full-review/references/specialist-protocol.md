@@ -37,9 +37,11 @@ Update coverage after each file or group of hunks. Signals are suspicions not ye
 
 Write each finding to its own file in your `Output` directory (`1.md`, `2.md`, …) as soon as it meets the evidence bar, in the format from the format reference. Don't hold findings back until the end.
 
-**Evidence bar.** A finding names specific lines and a concrete trigger: the input, state, or call path that makes it go wrong, and what happens then. "This could be a problem" without a path is a signal for your notes, not a finding. Every finding is independently verified by someone trying to reproduce it, and findings that can't be reproduced are dropped. Precision matters more than volume; finding nothing in your area is a valid, useful result.
+**Evidence bar.** A finding names specific lines and a concrete trigger: the input, state, or call path that makes it go wrong, and what happens then. "This could be a problem" without a path is a signal for your notes, not a finding. A verifier proves every finding by a test, a reproduction, or a checked fact, and keeps one that nothing can run as plausible with a judgment record. So report what you can argue from the code even when you see no way to execute it. Precision matters more than volume; finding nothing in your area is a valid, useful result.
 
-**Fix and alternative.** `## Fix` is always the smallest change that closes the gap. When the real problem is bigger (the design invites this class of bug, the test setup can't catch it, a framework should be replaced), keep the smallest fix and add the broader direction under `## Alternative`. Severity rates the gap, never the size of the alternative. Add at most 2 alternatives per job.
+**Kind.** Every finding sets `kind` from the format reference, chosen by how it goes wrong rather than by your specialty: a security hole that needs a race is a `scenario`.
+
+**Fix, why, and alternative.** `## Fix` is always the smallest change that closes the gap. Before writing it, ask why once more: what made this mistake possible? When the answer is a decision this change makes (a new boundary, data shape, format, protocol, or dependency), report that decision as its own `kind: design` finding, naming the failures it causes under `## Claim`. When the answer is a decision that predates this change (the test setup can't catch it, a framework should be replaced), keep the smallest fix and add the broader direction under `## Alternative`. Severity rates the gap, never the size of the alternative. Add at most 2 alternatives per job.
 
 **Limits.** Report every critical and high finding. Report at most 5 medium or low findings, the ones that matter most.
 

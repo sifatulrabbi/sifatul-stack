@@ -14,6 +14,10 @@ import sys
 SKILL_DIR = pathlib.Path(__file__).resolve().parent.parent
 SEV = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 STATUSES = ("confirmed", "plausible", "refuted", "unproven", "duplicate")
+KEPT = ("confirmed", "plausible")
+KINDS = ("behavior", "scenario", "test-gap", "design", "instructions")
+PROOFS = ("test", "run", "fact", "trace")
+UNKINDED = "related-prs"
 
 
 class Malformed(Exception):
@@ -73,6 +77,9 @@ def load_findings(round_dir):
             if meta.get("severity") not in SEV:
                 errors.append(f"{rel}: severity must be one of {', '.join(SEV)}")
                 continue
+            if job_dir.name != UNKINDED and meta.get("kind") not in KINDS:
+                errors.append(f"{rel}: kind must be one of {', '.join(KINDS)}")
+                continue
             if not title:
                 errors.append(f"{rel}: no '# ' title")
                 continue
@@ -86,9 +93,24 @@ def load_findings(round_dir):
                     "severity": meta["severity"],
                     "title": title,
                     "sections": sections,
+                    "symptoms": [i.strip() for i in meta.get("symptoms", "").split(",") if i.strip()],
                 }
             )
-    return findings, errors
+    return findings, errors + symptom_errors(round_dir, findings)
+
+
+def symptom_errors(round_dir, findings):
+    ids = {f["id"] for f in findings}
+    root_causes = {f["id"] for f in findings if f["symptoms"]}
+    errors = []
+    for f in findings:
+        rel = f["path"].relative_to(round_dir)
+        for i in f["symptoms"]:
+            if i not in ids:
+                errors.append(f"{rel}: symptoms names {i}, which is not a finding in this round")
+            elif i in root_causes:
+                errors.append(f"{rel}: symptoms names {i}, which is itself a root cause")
+    return errors
 
 
 def fail(errors):
@@ -179,10 +201,17 @@ def verdict_of(round_dir, f):
     meta, _, sections = read_md(path)
     if meta.get("status") not in STATUSES:
         raise Malformed(f"status must be one of {', '.join(STATUSES)}")
+    if meta["status"] in KEPT and meta.get("proof") not in PROOFS:
+        raise Malformed(f"proof must be one of {', '.join(PROOFS)} on a {meta['status']} verdict")
+    if meta["status"] == "confirmed" and meta["proof"] == "trace":
+        raise Malformed("proof: trace cannot back a confirmed verdict")
+    if meta["status"] == "plausible" and "Judgment" not in sections:
+        raise Malformed("a plausible verdict needs a Judgment section")
     evidence = sections.get("Evidence", "")
     return {
         "path": path,
-        "status": meta.get("status", ""),
+        "status": meta["status"],
+        "proof": meta.get("proof", ""),
         "severity": meta.get("severity") if meta.get("severity") in SEV else f["severity"],
         "duplicate_of": meta.get("duplicate_of", ""),
         "alternative": meta.get("alternative", ""),
@@ -208,7 +237,7 @@ def final(round_dir):
     for c in clusters:
         for f in c["members"]:
             v = verdicts[f["id"]]
-            if v and v["status"] in ("confirmed", "plausible"):
+            if v and v["status"] in KEPT:
                 kept.append((f, v))
             elif not v:
                 unverified.append(f)
@@ -230,7 +259,7 @@ def final(round_dir):
     ]
     for f, v in kept:
         out.append(
-            f"- {v['severity']}, {v['status']}: {f['title']} ({location(f['file'], f['lines'])}), "
+            f"- {v['severity']}, {v['status']} ({v['proof']}): {f['title']} ({location(f['file'], f['lines'])}), "
             f"{f['path'].relative_to(round_dir)}, {v['path'].relative_to(round_dir)}"
         )
     alternatives = [(f, f["sections"]["Alternative"]) for f, v in kept if f["sections"].get("Alternative") and v["alternative"] != "drop"]
