@@ -39,6 +39,10 @@ if [ ! -d "$review_tree" ]; then
   mkdir -p "$wt_base"
   git worktree add --detach "$review_tree" "$head" >/dev/null 2>&1
 fi
+if ! git -C "$review_tree" merge-base --is-ancestor "$head" HEAD; then
+  echo "review tree $review_tree is not at $head; run cleanup_run.sh $1 first" >&2
+  exit 1
+fi
 
 echo "ROUND=$round"
 echo "ROUND_DIR=$round_dir"

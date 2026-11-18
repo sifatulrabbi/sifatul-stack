@@ -86,6 +86,24 @@ class InitRunTest(unittest.TestCase):
 
         self.assertEqual(out["ROUND"], "1")
 
+    def test_resumes_a_round_whose_review_tree_has_fixer_commits(self):
+        out = self.repo.sh("init_run.sh", "pr/7", self.first)
+        Repo(self, pathlib.Path(out["REVIEW_TREE"])).commit("fixed")
+
+        resumed = self.repo.sh("init_run.sh", "pr/7", self.first)
+
+        self.assertEqual(resumed["REVIEW_TREE"], out["REVIEW_TREE"])
+
+    def test_refuses_a_review_tree_left_at_another_head(self):
+        out = self.repo.sh("init_run.sh", "pr/7", self.first)
+        shutil.rmtree(out["ROUND_DIR"])
+        other_head = self.repo.commit("b")
+
+        res = self.repo.run("init_run.sh", "pr/7", other_head)
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertEqual((pathlib.Path(out["REVIEW_TREE"]) / "f.txt").read_text(), "a")
+
     def test_new_push_after_a_finished_round_starts_the_next_round(self):
         first = self.repo.sh("init_run.sh", "pr/7", self.first)
         self.finish(first["ROUND_DIR"])
