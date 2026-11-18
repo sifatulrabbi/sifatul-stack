@@ -25,7 +25,7 @@ A review is only cold if its reviewer didn't write the code. If this session edi
 
 Identify base and head without changing the user's checkout:
 
-- **GitHub PR:** `gh pr view <n> --json number,title,body,url,baseRefName,headRefName,headRefOid`, then `git fetch origin <baseRefName> pull/<n>/head`. Target: `pr/<n>`.
+- **GitHub PR:** `gh pr view <n> --json number,title,body,url,baseRefName,headRefName,headRefOid`, then `git fetch origin <baseRefName> pull/<n>/head`. Base is `origin/<baseRefName>`, the PR's own base branch: for a PR stacked on another branch that is the branch beneath it, not the default branch. Target: `pr/<n>`.
 - **Local branch:** base is the default branch, head is the branch tip. Target: `branch/<name>`.
 - **Uncommitted work:** head is `git stash create` (a commit of the working tree that leaves it untouched; fall back to `HEAD` if empty). Untracked files aren't included; ask the user to stage them if they should be reviewed. Target: `wip/<branch>`.
 
