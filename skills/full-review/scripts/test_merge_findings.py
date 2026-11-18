@@ -260,13 +260,16 @@ class FinalTest(RoundTest):
 
     def test_refuses_a_kept_verdict_that_does_not_say_how_it_was_proved(self):
         self.r.add("security", 1, finding())
+        self.r.add("security", 2, finding(lines="200-210"))
         self.r.done("security")
         self.r.verify("security-1", verdict(status="plausible", proof=None))
+        self.r.verify("security-2", verdict(status="confirmed", proof="guess"))
 
         res = self.r.run("final")
 
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("verified/security-1.md: proof", res.stderr)
+        self.assertIn("verified/security-2.md: proof", res.stderr)
 
     def test_refuses_a_confirmed_verdict_proved_only_by_trace(self):
         self.r.add("security", 1, finding())
