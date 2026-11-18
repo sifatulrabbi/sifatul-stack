@@ -45,7 +45,7 @@ class Repo:
         assert res.returncode == 0, res.stderr
         out = dict(line.split("=", 1) for line in res.stdout.splitlines() if "=" in line)
         if script == "init_run.sh":
-            self.test.addCleanup(shutil.rmtree, pathlib.Path(out["ROUND_DIR"]).parent, True)
+            self.test.addCleanup(shutil.rmtree, pathlib.Path(out["ROUND_DIR"]).parents[2], True)
             self.test.addCleanup(self.run, "cleanup_run.sh", args[0])
         return out
 
