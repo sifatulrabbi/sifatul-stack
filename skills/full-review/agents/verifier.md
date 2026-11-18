@@ -46,7 +46,7 @@ Run two short probes on every finding you reproduced:
 - **Sibling probe**: look for the same mistake elsewhere in the change, such as other handlers or other callers of the same API. Under `## Notes`, write `class: <the mistake in a few words>` and the other locations. The lead uses these to find root causes; you open no findings for them.
 - **Fix check**: apply the finding's `## Fix` in the scratch worktree and rerun the reproduction. Set `fix_check: pass` when the fix closes the failure, `fail` when it doesn't, and under `## Notes` say what the fix misses. For most kinds closing it means the reproduction goes green; for a test-gap it means the suite goes red with the mutation and green without it. Omit `fix_check` when the Fix deletes or rewrites a test that doesn't earn its keep. Reset the worktree afterwards.
 
-A reproduction becomes the verdict's `## Regression test` only when it passes the regression-test gate in the format reference. Otherwise it stays in `## Evidence` as the proof.
+A reproduction becomes the verdict's `## Regression test`, with its file in `regression_test_target`, only when it passes the regression-test gate in the format reference. Otherwise it stays in `## Evidence` as the proof.
 
 ## Judgment record
 
