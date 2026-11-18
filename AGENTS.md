@@ -30,3 +30,12 @@ One harness-neutral stack of skills, named sub-agents, and global instructions, 
 - `make -C cli check` (gofmt, vet, race tests). The `stack` tests render the real `agents/` and `instructions/` from this repo against throwaway homes; the `cmd` tests drive `install` and `status` against a real local git upstream.
 - `cli/bin/sifatul-stack status` is read-only against the real home.
 - After changing agent formats, confirm each harness still loads them: `opencode debug agents --standalone` with `XDG_CONFIG_HOME` pointing at a temp dir, `codex debug prompt-input` with `CODEX_HOME` pointing at a temp dir, and for Claude Code copy the rendered files into a temp project's `.claude/agents/` and ask `claude -p` which subagents it sees.
+
+## Releases
+
+Users install the CLI from the Homebrew tap github.com/sifatulrabbi/homebrew-tap (`Formula/sifatul-stack.rb`), which builds `cli/` from a tag's source tarball with Homebrew's `go` and stamps `-X main.version`. Releasing is manual, spans both repos, and happens only when the user asks; only `cli/` changes need one.
+
+1. `sifatul-stack`: on an up-to-date `main` with `make -C cli check` passing, push an annotated `vX.Y.Z` tag, then `gh release create vX.Y.Z --title vX.Y.Z --generate-notes`.
+2. Tap, checked out at `$(brew --repository sifatulrabbi/tap)`: `git pull --ff-only`, then `brew bump-formula-pr --write-only --commit --url https://github.com/sifatulrabbi/sifatul-stack/archive/refs/tags/vX.Y.Z.tar.gz sifatulrabbi/tap/sifatul-stack` rewrites `url` and `sha256` and commits. Confirm with `brew audit --strict --online`, `brew upgrade` (or `brew install --build-from-source`), and `brew test` on `sifatulrabbi/tap/sifatul-stack`, then push the tap's `main`.
+
+Keep the `go` line in `cli/go.mod` at or below the Go version Homebrew ships (`brew info go`); a newer one breaks the formula build.
