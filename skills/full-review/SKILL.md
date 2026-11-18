@@ -25,13 +25,13 @@ A review is only cold if its reviewer didn't write the code. If this session edi
 
 Identify base and head without changing the user's checkout:
 
-- **GitHub PR:** `gh pr view <n> --json number,title,body,url,baseRefName,headRefName,headRefOid`, then `git fetch origin <baseRefName> pull/<n>/head`. Target: `pr<n>`.
-- **Local branch:** base is the default branch, head is the branch tip. Target: the branch name.
-- **Uncommitted work:** head is `git stash create` (a commit of the working tree that leaves it untouched; fall back to `HEAD` if empty). Untracked files aren't included; ask the user to stage them if they should be reviewed. Target: `<branch>-wip`.
+- **GitHub PR:** `gh pr view <n> --json number,title,body,url,baseRefName,headRefName,headRefOid`, then `git fetch origin <baseRefName> pull/<n>/head`. Target: `pr/<n>`.
+- **Local branch:** base is the default branch, head is the branch tip. Target: `branch/<name>`.
+- **Uncommitted work:** head is `git stash create` (a commit of the working tree that leaves it untouched; fall back to `HEAD` if empty). Untracked files aren't included; ask the user to stage them if they should be reviewed. Target: `wip/<branch>`, or `wip/HEAD` on a detached HEAD.
 
-Run `SKILL_DIR/scripts/init_run.sh <target> <head-sha>` from the repo root. Each review of a target is a round; the script resumes an unfinished round at the same head, or starts the next one. It prints:
+Run `SKILL_DIR/scripts/init_run.sh <target> <head-sha>` from the repo root. Rounds, worktrees, and `FIXES_REF` are keyed by checkout and target, so reviews from different clones, worktrees, or targets never share them. Run every round and the cleanup of a target from the same checkout with the same `TMPDIR`: a session in another checkout, or with another `TMPDIR` (a sandboxed session sets its own), starts over at round 1. If the script refuses because the review tree isn't at head, check `git show-ref FIXES_REF` first: an existing ref pins unpushed fixes, so ask the user to push or discard them before running `cleanup_run.sh`. Each review of a target is a round; the script resumes an unfinished round at the same head, or starts the next one. It prints:
 
-- `ROUND_DIR`: `<target dir>/round-<N>`, where the target dir is `.planning/full-review/<target>` if the repo has a `.planning` dir, else `/tmp/full-review/<repo>/<target>`. All interim files live here.
+- `ROUND_DIR`: `<target dir>/round-<N>`, where the target dir is `.planning/full-review/<target>` if the repo has a `.planning` dir, else `$TMPDIR/full-review/<checkout>-<hash>/<target>` (`/tmp` when `TMPDIR` is unset; spaces in the checkout name become `-`). All interim files live here.
 - `PREV_ROUND_DIR`: the latest finished round of this target, or empty. If set, this is a re-review: follow "Re-review" below alongside every step.
 - `REVIEW_TREE`: a detached worktree at head. Every agent reads code from here, never from the user's checkout.
 - `WORKTREE_BASE`: where verifier scratch worktrees go.
