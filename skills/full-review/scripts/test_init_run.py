@@ -18,13 +18,9 @@ ENV = {
 
 
 class Repo:
-    def __init__(self, test, path, planning):
-        self.path = path
-        path.mkdir(parents=True)
-        if planning:
-            (path / ".planning").mkdir()
-        self.git("init", "-q", "-b", "main")
+    def __init__(self, test, path):
         self.test = test
+        self.path = path
 
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.path, env=ENV, check=True, capture_output=True, text=True).stdout.strip()
@@ -34,6 +30,12 @@ class Repo:
         self.git("add", "-A")
         self.git("commit", "-q", "-m", text)
         return self.git("rev-parse", "HEAD")
+
+    def worktree(self, path, planning):
+        self.git("worktree", "add", "-q", "--detach", str(path))
+        if planning:
+            (path / ".planning").mkdir()
+        return Repo(self.test, path)
 
     def run(self, script, *args):
         return subprocess.run(["bash", str(SCRIPTS / script), *args], cwd=self.path, env=ENV, capture_output=True, text=True)
@@ -57,7 +59,13 @@ class InitRunTest(unittest.TestCase):
         self.first = self.repo.commit("a")
 
     def make_repo(self, rel, planning):
-        return Repo(self, self.tmp / rel, planning)
+        path = self.tmp / rel
+        path.mkdir(parents=True)
+        if planning:
+            (path / ".planning").mkdir()
+        repo = Repo(self, path)
+        repo.git("init", "-q", "-b", "main")
+        return repo
 
     def finish(self, round_dir):
         (pathlib.Path(round_dir) / "review.md").write_text("# Review\n")
@@ -143,6 +151,19 @@ class InitRunTest(unittest.TestCase):
         two.sh("cleanup_run.sh", "branch/main")
 
         self.assertTrue((pathlib.Path(one_tree) / "f.txt").exists())
+
+    def test_worktrees_of_one_repo_never_share_rounds_trees_or_fixes(self):
+        for planning in [True, False]:
+            with self.subTest(planning=planning):
+                main = self.make_repo(f"{planning}/x/app", planning)
+                head = main.commit("a")
+                other = main.worktree(self.tmp / f"{planning}/y/app", planning)
+
+                first = main.sh("init_run.sh", "pr/1", head)
+                second = other.sh("init_run.sh", "pr/1", head)
+
+                for key in ["ROUND_DIR", "REVIEW_TREE", "FIXES_REF"]:
+                    self.assertNotEqual(first[key], second[key])
 
     def test_refuses_a_target_without_a_kind_and_a_name(self):
         for target in ["pr7", "pr", "pr/", "x/1"]:

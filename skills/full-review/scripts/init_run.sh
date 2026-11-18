@@ -6,35 +6,30 @@ source "$(dirname "$0")/run_paths.sh"
 run_paths "${1:?$usage}"
 head="$(git rev-parse --verify "${2:?$usage}^{commit}")"
 
-if [ -d "$REPO_ROOT/.planning" ]; then
-  target_dir="$REPO_ROOT/.planning/full-review/$TARGET_KEY"
-else
-  target_dir="/tmp/full-review/$REPO_KEY/$TARGET_KEY"
-fi
-mkdir -p "$target_dir"
+mkdir -p "$TARGET_DIR"
 
 last=0
 prev=""
-for dir in "$target_dir"/round-*/; do
+for dir in "$TARGET_DIR"/round-*/; do
   [ -d "$dir" ] || continue
   n="${dir%/}"
   n="${n##*/round-}"
   [ "$n" -gt "$last" ] && last="$n"
 done
 for ((n = last; n >= 1; n--)); do
-  if [ -f "$target_dir/round-$n/review.md" ]; then
-    prev="$target_dir/round-$n"
+  if [ -f "$TARGET_DIR/round-$n/review.md" ]; then
+    prev="$TARGET_DIR/round-$n"
     break
   fi
 done
 
 round=$((last + 1))
-if [ "$last" -gt 0 ] && [ ! -f "$target_dir/round-$last/review.md" ] &&
-  grep -qx "head: $head" "$target_dir/round-$last/round.md" 2>/dev/null; then
+if [ "$last" -gt 0 ] && [ ! -f "$TARGET_DIR/round-$last/review.md" ] &&
+  grep -qx "head: $head" "$TARGET_DIR/round-$last/round.md" 2>/dev/null; then
   round="$last"
 fi
 
-round_dir="$target_dir/round-$round"
+round_dir="$TARGET_DIR/round-$round"
 mkdir -p "$round_dir/jobs" "$round_dir/notes" "$round_dir/findings" "$round_dir/verified"
 [ -f "$round_dir/round.md" ] || printf -- '---\nhead: %s\n---\n' "$head" >"$round_dir/round.md"
 
