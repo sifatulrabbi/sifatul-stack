@@ -93,9 +93,24 @@ def load_findings(round_dir):
                     "severity": meta["severity"],
                     "title": title,
                     "sections": sections,
+                    "symptoms": [i.strip() for i in meta.get("symptoms", "").split(",") if i.strip()],
                 }
             )
-    return findings, errors
+    return findings, errors + symptom_errors(round_dir, findings)
+
+
+def symptom_errors(round_dir, findings):
+    ids = {f["id"] for f in findings}
+    root_causes = {f["id"] for f in findings if f["symptoms"]}
+    errors = []
+    for f in findings:
+        rel = f["path"].relative_to(round_dir)
+        for i in f["symptoms"]:
+            if i not in ids:
+                errors.append(f"{rel}: symptoms names {i}, which is not a finding in this round")
+            elif i in root_causes:
+                errors.append(f"{rel}: symptoms names {i}, which is itself a root cause")
+    return errors
 
 
 def fail(errors):

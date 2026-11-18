@@ -9,7 +9,7 @@ SCRIPT = pathlib.Path(__file__).with_name("merge_findings.py")
 SKILL_DIR = SCRIPT.parent.parent
 
 
-def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134", severity: str | None = "high", kind: str | None = "behavior", title="PATCH has no ownership check", extra=""):
+def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134", severity: str | None = "high", kind: str | None = "behavior", title="PATCH has no ownership check", extra="", symptoms: str | None = None):
     head = ["---"]
     if file is not None:
         head.append(f"file: {file}")
@@ -19,6 +19,8 @@ def finding(file: str | None = "src/api/users.ts", lines: str | None = "120-134"
         head.append(f"severity: {severity}")
     if kind is not None:
         head.append(f"kind: {kind}")
+    if symptoms is not None:
+        head.append(f"symptoms: {symptoms}")
     head.append("---")
     body = textwrap.dedent(
         f"""
@@ -320,6 +322,36 @@ class KindTest(RoundTest):
         res = self.r.run("merge")
 
         self.assertEqual(res.returncode, 0, res.stderr)
+
+
+class SymptomsTest(RoundTest):
+    def test_accepts_symptoms_that_name_this_rounds_findings(self):
+        self.r.add("correctness", 1, finding())
+        self.r.add("correctness", 2, finding(file="src/b.ts"))
+        self.r.done("correctness")
+        self.r.add("root-cause", 1, finding(kind="design", symptoms="correctness-1, correctness-2"))
+        self.r.done("root-cause")
+
+        res = self.r.run("merge")
+
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_refuses_symptoms_that_name_no_finding_or_a_root_cause(self):
+        self.r.add("correctness", 1, finding())
+        self.r.done("correctness")
+        self.r.add("root-cause", 1, finding(kind="design", symptoms="correctness-1, correctness-9"))
+        self.r.add("carried", 1, finding(kind="design", symptoms="root-cause-1"))
+        self.r.done("root-cause")
+        self.r.done("carried")
+
+        res = self.r.run("merge")
+
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("findings/root-cause/1.md: symptoms", res.stderr)
+        self.assertIn("correctness-9", res.stderr)
+        self.assertNotIn("correctness-1,", res.stderr)
+        self.assertIn("findings/carried/1.md: symptoms", res.stderr)
+        self.assertEqual(self.r.jobs(), [])
 
 
 if __name__ == "__main__":

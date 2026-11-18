@@ -40,7 +40,7 @@ Move ownership checks into a route-level middleware so new handlers get them by 
   - `test-gap`: a missing test, or a test that doesn't earn its keep.
   - `design`: a decision in this change (a boundary, data shape, format, protocol, dependency) that causes or invites failures.
   - `instructions`: text an agent or person follows (a prompt, skill, agent role, runbook) that will lead them wrong.
-- `symptoms` (root causes only): the comma-separated ids of the kept findings this design finding causes.
+- `symptoms` (root causes only): the comma-separated ids of the kept findings this design finding causes, all from the same round. Merge refuses an id that names no finding in the round or names another root cause.
 - `## Trigger`: how to make it go wrong. The verifier starts here, so make it concrete. For a scenario, specify the reproduction setup: the starting state, the ordering, timing, or fault, and how to force it.
 - `## Fix`: the smallest change that closes the gap.
 - `carried_from` (carried findings only): the previous round's verdict file for this finding, which the verifier reruns.
